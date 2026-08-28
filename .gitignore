@@ -1,0 +1,15 @@
+.venv/
+venv/
+.insightface/
+__pycache__/
+*.py[cod]
+.env
+.pytest_cache/
+.coverage
+data/*.db
+data/students/*
+embeddings/*
+*.jpg
+*.jpeg
+*.png
+!.gitkeep
