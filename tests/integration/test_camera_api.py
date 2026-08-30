@@ -54,7 +54,18 @@ async def test_camera_api_endpoints(client):
     assert onvif_resp.status_code == 200
     assert "cameras" in onvif_resp.json()
 
-    # 9. Delete Camera
+    # 9. Test Frame Ingestion Endpoint
+    import numpy as np
+    import cv2
+    img = np.zeros((100, 100, 3), dtype=np.uint8)
+    _, buf = cv2.imencode(".jpg", img)
+    files = {"file": ("frame.jpg", buf.tobytes(), "image/jpeg")}
+    data = {"camera_id": camera_id, "token": token}
+    frame_resp = await client.post("/api/v1/cameras/mobile-frame", data=data, files=files)
+    assert frame_resp.status_code == 200
+    assert frame_resp.json()["camera_id"] == camera_id
+
+    # 10. Delete Camera
     del_resp = await client.delete(f"/api/v1/cameras/{camera_id}")
     assert del_resp.status_code == 204
 

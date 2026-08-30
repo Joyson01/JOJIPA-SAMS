@@ -7,6 +7,7 @@ import {
   AlertCircle,
   ShieldAlert,
   Smartphone,
+  Wifi,
 } from 'lucide-react';
 import { apiClient } from '../../services/api';
 
@@ -25,14 +26,19 @@ export const MobileCameraPage: React.FC = () => {
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [framesSent, setFramesSent] = useState<number>(0);
+  const [liveFps, setLiveFps] = useState<number>(0);
   const [lastRecognition, setLastRecognition] = useState<string>('Ready to stream');
   const [detectedCount, setDetectedCount] = useState<number>(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [transportMode, setTransportMode] = useState<'WEBSOCKET' | 'HTTP_FALLBACK'>('WEBSOCKET');
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const intervalRef = useRef<any>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const frameCountRef = useRef<number>(0);
+  const lastFpsCalcRef = useRef<number>(Date.now());
 
   // Validate Pairing Session on Mount
   useEffect(() => {
@@ -62,6 +68,55 @@ export const MobileCameraPage: React.FC = () => {
     validate();
   }, [tokenParam]);
 
+  // Establish WebSocket Uplink to Backend
+  const connectWebSocket = () => {
+    if (!cameraId) return null;
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = window.location.host;
+    const wsUrl = `${protocol}//${host}/api/v1/cameras/${cameraId}/mobile-uplink?token=${tokenParam || ''}&session_id=${sessionIdParam || ''}`;
+
+    try {
+      const ws = new WebSocket(wsUrl);
+      ws.binaryType = 'blob';
+
+      ws.onopen = () => {
+        setTransportMode('WEBSOCKET');
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'telemetry') {
+            setDetectedCount(data.faces_detected || 0);
+            if (data.recognized && data.recognized.length > 0) {
+              setLastRecognition(`Identified: ${data.recognized.join(', ')}`);
+            } else if (data.faces_detected > 0) {
+              setLastRecognition(`${data.faces_detected} face(s) tracking...`);
+            } else {
+              setLastRecognition('Scanning for faces...');
+            }
+          }
+        } catch (e) {
+          // ignore
+        }
+      };
+
+      ws.onerror = () => {
+        setTransportMode('HTTP_FALLBACK');
+      };
+
+      ws.onclose = () => {
+        wsRef.current = null;
+      };
+
+      wsRef.current = ws;
+      return ws;
+    } catch (err) {
+      setTransportMode('HTTP_FALLBACK');
+      return null;
+    }
+  };
+
   const startCamera = async () => {
     setErrorMessage(null);
     try {
@@ -83,10 +138,15 @@ export const MobileCameraPage: React.FC = () => {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
       }
+
+      // Connect WebSocket Uplink
+      connectWebSocket();
       setIsStreaming(true);
 
-      // Stream frames to server at controlled rate (600ms = ~1.7 FPS, reliable over mobile Wi-Fi)
-      intervalRef.current = setInterval(sendFrameToBackend, 600);
+      // Start frame capture loop at ~10-12 FPS (every 90ms)
+      frameCountRef.current = 0;
+      lastFpsCalcRef.current = Date.now();
+      intervalRef.current = setInterval(sendFrameToBackend, 90);
     } catch (err: any) {
       console.error('Camera access error:', err);
       setErrorMessage(
@@ -105,7 +165,12 @@ export const MobileCameraPage: React.FC = () => {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
     setIsStreaming(false);
+    setLiveFps(0);
   };
 
   const toggleFacingMode = () => {
@@ -122,11 +187,11 @@ export const MobileCameraPage: React.FC = () => {
     return () => stopCamera();
   }, []);
 
-  const sendFrameToBackend = async () => {
+  const sendFrameToBackend = () => {
     if (!videoRef.current || !canvasRef.current) return;
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    if (video.videoWidth === 0) return;
+    if (video.videoWidth === 0 || video.readyState < 2) return;
 
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
@@ -134,10 +199,27 @@ export const MobileCameraPage: React.FC = () => {
     if (!ctx) return;
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
+    // Calculate real live transmission FPS
+    frameCountRef.current += 1;
+    const now = Date.now();
+    if (now - lastFpsCalcRef.current >= 1000) {
+      setLiveFps(frameCountRef.current);
+      frameCountRef.current = 0;
+      lastFpsCalcRef.current = now;
+    }
+
     canvas.toBlob(
       async (blob) => {
         if (!blob) return;
 
+        // Preferred Path: Fast binary WebSocket transmission
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          wsRef.current.send(blob);
+          setFramesSent((prev) => prev + 1);
+          return;
+        }
+
+        // Fallback Path: HTTP POST
         const formData = new FormData();
         formData.append('file', blob, 'mobile_frame.jpg');
         formData.append('camera_id', cameraId);
@@ -148,29 +230,23 @@ export const MobileCameraPage: React.FC = () => {
           const res = await apiClient.post('/cameras/mobile-frame', formData, {
             headers: { 'Content-Type': 'multipart/form-data' },
           });
-
           setFramesSent((prev) => prev + 1);
           const data = res.data;
           setDetectedCount(data.faces_detected || 0);
-
           if (data.results && data.results.length > 0) {
             const names = data.results
               .map((r: any) => r.name)
               .filter((n: string) => n !== 'UNKNOWN');
             if (names.length > 0) {
               setLastRecognition(`Identified: ${names.join(', ')}`);
-            } else {
-              setLastRecognition(`${data.faces_detected} face(s) tracking...`);
             }
-          } else {
-            setLastRecognition('Scanning for faces...');
           }
         } catch (err) {
           // network frame skip
         }
       },
       'image/jpeg',
-      0.8
+      0.75
     );
   };
 
@@ -220,7 +296,7 @@ export const MobileCameraPage: React.FC = () => {
             }`}
           />
           <span className="text-slate-300 font-semibold">
-            {isStreaming ? 'Live Stream' : 'Standby'}
+            {isStreaming ? 'Streaming' : 'Standby'}
           </span>
         </div>
       </div>
@@ -252,7 +328,7 @@ export const MobileCameraPage: React.FC = () => {
               <Tv className="w-10 h-10 mx-auto text-slate-600" />
               <p className="text-sm font-medium text-slate-200">Smartphone Camera Ready</p>
               <p className="text-xs text-slate-500 max-w-xs mx-auto">
-                Tap Start Camera below to begin wireless frame transmission to classroom attendance.
+                Tap "Start Camera" below to stream live video directly to the SAMS laptop preview.
               </p>
             </div>
           )}
@@ -270,8 +346,11 @@ export const MobileCameraPage: React.FC = () => {
 
         {/* Telemetry Counter */}
         <div className="flex items-center justify-between px-2 text-[11px] text-slate-400 font-mono">
-          <span>Camera ID: {cameraId ? cameraId.slice(0, 10) : 'mobile'}</span>
-          <span>Frames Sent: {framesSent}</span>
+          <span className="flex items-center gap-1">
+            <Wifi className="w-3 h-3 text-emerald-400" />
+            <span>{transportMode}</span>
+          </span>
+          <span>{liveFps > 0 ? `${liveFps} FPS` : ''} · Frames: {framesSent}</span>
         </div>
       </div>
 

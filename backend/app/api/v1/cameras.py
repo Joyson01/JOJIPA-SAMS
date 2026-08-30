@@ -1,8 +1,19 @@
-import asyncio
-from pathlib import Path
 from typing import List, Optional
 import cv2
-from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Response,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from fastapi.responses import StreamingResponse
 import numpy as np
 from sqlalchemy import select
@@ -252,10 +263,24 @@ async def get_camera_mjpeg_stream(
     db: AsyncSession = Depends(get_db),
 ):
     async def mjpeg_generator():
+        # Yield initial blank frame to immediately establish HTTP multipart streaming connection
+        cached = CameraService.get_cached_frame(camera_id)
+        if cached is not None:
+            ret, jpeg = cv2.imencode(".jpg", cached, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+        else:
+            blank = np.zeros((360, 480, 3), dtype=np.uint8)
+            ret, jpeg = cv2.imencode(".jpg", blank, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+
+        if ret:
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n\r\n" + jpeg.tobytes() + b"\r\n"
+            )
+
         while True:
             frame = CameraService.get_cached_frame(camera_id)
             if frame is not None:
-                ret, jpeg = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
+                ret, jpeg = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
                 if ret:
                     yield (
                         b"--frame\r\n"
@@ -269,6 +294,111 @@ async def get_camera_mjpeg_stream(
     )
 
 
+@router.websocket("/{camera_id}/mobile-uplink")
+async def mobile_camera_websocket_uplink(
+    websocket: WebSocket,
+    camera_id: str,
+    token: Optional[str] = Query(None),
+    session_id: Optional[str] = Query(None),
+):
+    """Real-time binary frame ingestion transport over WebSocket from phone browser."""
+    await websocket.accept()
+    from backend.app.database.session import AsyncSessionLocal
+    import json
+
+    # Validate pairing and set camera streaming
+    async with AsyncSessionLocal() as db:
+        if token:
+            valid = await CameraService.validate_pairing_session(db, token)
+            if not valid:
+                await websocket.send_text(json.dumps({"type": "error", "message": "Invalid or expired token"}))
+                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                return
+        camera = await db.get(Camera, camera_id)
+        if camera:
+            camera.status = "STREAMING"
+            await db.commit()
+
+    try:
+        while True:
+            # Receive binary frame payload (JPEG buffer)
+            frame_bytes = await websocket.receive_bytes()
+            nparr = np.frombuffer(frame_bytes, np.uint8)
+            image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+            if image is not None:
+                async with AsyncSessionLocal() as db:
+                    await CameraService.record_frame_received(db, camera_id, frame=image)
+                    # Broadcast frame to connected desktop viewers in real time
+                    await CameraService.broadcast_frame(camera_id, frame_bytes)
+
+                    # If session is active, run recognition pipeline
+                    if session_id:
+                        pipeline = get_pipeline()
+                        if pipeline.matcher.total_templates == 0:
+                            await RecognitionService.sync_gallery_from_db(db)
+
+                        results, _ = pipeline.process_frame(image)
+                        for r in results:
+                            if r.decision.value == "KNOWN" and r.best_match:
+                                try:
+                                    await AttendanceService.mark_attendance(
+                                        db=db,
+                                        session_id=session_id,
+                                        payload=AttendanceMarkPayload(
+                                            student_id=r.best_match.student_id,
+                                            camera_id=camera_id,
+                                            confidence=r.best_match.similarity,
+                                            liveness_score=r.liveness_score,
+                                            remarks=f"Mobile camera ({r.best_match.confidence_pct:.1f}%)",
+                                        ),
+                                    )
+                                except Exception:
+                                    pass
+
+                        await websocket.send_text(
+                            json.dumps({
+                                "type": "telemetry",
+                                "faces_detected": len(results),
+                                "recognized": [r.best_match.name for r in results if r.best_match and r.decision.value == "KNOWN"],
+                            })
+                        )
+    except (WebSocketDisconnect, Exception):
+        pass
+    finally:
+        async with AsyncSessionLocal() as db:
+            await CameraService.set_camera_offline(db, camera_id, status_label="DISCONNECTED")
+
+
+@router.websocket("/{camera_id}/laptop-stream")
+async def laptop_camera_websocket_downlink(
+    websocket: WebSocket,
+    camera_id: str,
+):
+    """Real-time binary frame stream delivery over WebSocket to laptop Live Attendance/Preview."""
+    await websocket.accept()
+    CameraService.add_subscriber(camera_id, websocket)
+
+    # If cached frame exists, send immediately
+    cached = CameraService.get_cached_frame(camera_id)
+    if cached is not None:
+        ret, jpeg = cv2.imencode(".jpg", cached, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+        if ret:
+            try:
+                await websocket.send_bytes(jpeg.tobytes())
+            except Exception:
+                pass
+
+    try:
+        while True:
+            # Keepalive listener
+            msg = await websocket.receive_text()
+            if msg == "ping":
+                await websocket.send_text("pong")
+    except (WebSocketDisconnect, Exception):
+        pass
+    finally:
+        CameraService.remove_subscriber(camera_id, websocket)
 
 
 @router.post(
@@ -295,6 +425,8 @@ async def process_mobile_frame(
 
     # Record real frame activity and cache latest frame for preview
     await CameraService.record_frame_received(db, camera_id, frame=image)
+    # Also broadcast frame to connected laptop viewers
+    await CameraService.broadcast_frame(camera_id, contents)
 
     pipeline = get_pipeline()
     if pipeline.matcher.total_templates == 0:

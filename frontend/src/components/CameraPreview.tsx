@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Smartphone, Radio, FileVideo, AlertTriangle } from 'lucide-react';
+import { Smartphone, Radio, AlertTriangle } from 'lucide-react';
 import { CameraDevice } from '../types/camera';
 
 interface CameraPreviewProps {
@@ -14,8 +14,12 @@ export const CameraPreview: React.FC<CameraPreviewProps> = ({
   autoPlay = true,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+
   const [streamError, setStreamError] = useState<string | null>(null);
+  const [hasReceivedFrames, setHasReceivedFrames] = useState<boolean>(false);
   const [snapshotUrl, setSnapshotUrl] = useState<string>('');
   const [imgError, setImgError] = useState<boolean>(false);
 
@@ -23,6 +27,7 @@ export const CameraPreview: React.FC<CameraPreviewProps> = ({
   useEffect(() => {
     setStreamError(null);
     setImgError(false);
+    setHasReceivedFrames(false);
 
     if (camera.source_type === 'WEBCAM') {
       let isMounted = true;
@@ -63,15 +68,55 @@ export const CameraPreview: React.FC<CameraPreviewProps> = ({
         }
       };
     } else {
-      // For RTSP, Mobile, or Video File -> use server-side MJPEG / preview frame stream
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
-      const streamEndpoint = `${apiUrl}/cameras/${camera.id}/mjpeg`;
-      setSnapshotUrl(streamEndpoint);
+      // Remote Stream (Mobile or CCTV RTSP)
+      // 1. Setup MJPEG stream fallback
+      const mjpegEndpoint = `/api/v1/cameras/${camera.id}/mjpeg`;
+      setSnapshotUrl(mjpegEndpoint);
+
+      // 2. Connect high-performance WebSocket Downlink
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const host = window.location.host;
+      const wsUrl = `${protocol}//${host}/api/v1/cameras/${camera.id}/laptop-stream`;
+
+      try {
+        const ws = new WebSocket(wsUrl);
+        ws.binaryType = 'blob';
+
+        ws.onmessage = (event) => {
+          if (event.data instanceof Blob) {
+            setHasReceivedFrames(true);
+            const blobUrl = URL.createObjectURL(event.data);
+            const img = new Image();
+            img.onload = () => {
+              const canvas = canvasRef.current;
+              if (canvas) {
+                canvas.width = img.naturalWidth || 640;
+                canvas.height = img.naturalHeight || 480;
+                const ctx = canvas.getContext('2d');
+                if (ctx) ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+              }
+              URL.revokeObjectURL(blobUrl);
+            };
+            img.src = blobUrl;
+          }
+        };
+
+        wsRef.current = ws;
+      } catch (err) {
+        console.warn('WebSocket downlink notice:', err);
+      }
+
+      return () => {
+        if (wsRef.current) {
+          wsRef.current.close();
+          wsRef.current = null;
+        }
+      };
     }
   }, [camera, autoPlay]);
 
-  const isStreaming = camera.status === 'STREAMING' || camera.status === 'CONNECTED';
-  const isNoFrame = camera.status === 'NO_FRAME';
+  const isStreaming = camera.status === 'STREAMING';
+  const isNoFrame = camera.status === 'NO_FRAME' || (camera.status === 'OFFLINE' && !hasReceivedFrames);
 
   return (
     <div
@@ -94,39 +139,44 @@ export const CameraPreview: React.FC<CameraPreviewProps> = ({
           />
         )
       ) : (
-        // Server-Side Ingestion Stream (RTSP / Mobile / Video File)
+        // Remote Stream: Real-Time Canvas / MJPEG Fallback
         <div className="w-full h-full relative flex items-center justify-center">
-          {!imgError && snapshotUrl ? (
-            <img
-              src={snapshotUrl}
-              alt={camera.name}
-              onError={() => setImgError(true)}
-              className="w-full h-full object-cover"
-            />
-          ) : (
-            <div className="text-center p-6 text-slate-400 space-y-2">
-              {camera.source_type === 'MOBILE' ? (
-                <Smartphone className="w-8 h-8 mx-auto text-blue-400 animate-pulse" />
-              ) : camera.source_type === 'RTSP' ? (
-                <Radio className="w-8 h-8 mx-auto text-purple-400 animate-pulse" />
+          <canvas
+            ref={canvasRef}
+            className={`w-full h-full object-contain ${hasReceivedFrames ? 'block' : 'hidden'}`}
+          />
+
+          {!hasReceivedFrames && (
+            <>
+              {!imgError && snapshotUrl ? (
+                <img
+                  src={snapshotUrl}
+                  alt={camera.name}
+                  onError={() => setImgError(true)}
+                  className="w-full h-full object-contain"
+                />
               ) : (
-                <FileVideo className="w-8 h-8 mx-auto text-amber-400 animate-pulse" />
+                <div className="text-center p-6 text-slate-400 space-y-2">
+                  {camera.source_type === 'MOBILE' ? (
+                    <Smartphone className="w-8 h-8 mx-auto text-blue-400 animate-pulse" />
+                  ) : (
+                    <Radio className="w-8 h-8 mx-auto text-purple-400 animate-pulse" />
+                  )}
+                  <div className="text-xs font-semibold text-slate-200">
+                    {camera.status === 'OFFLINE'
+                      ? 'Camera Feed Offline'
+                      : isNoFrame
+                      ? 'Waiting for Phone Stream...'
+                      : 'Awaiting Frame Ingestion'}
+                  </div>
+                  <div className="text-[11px] text-slate-400 max-w-xs">
+                    {camera.source_type === 'MOBILE'
+                      ? 'Open the QR pairing link on your phone and tap "Start Camera" to stream live video.'
+                      : 'Ensure RTSP IP camera endpoint is reachable on the local network.'}
+                  </div>
+                </div>
               )}
-              <div className="text-xs font-semibold text-slate-200">
-                {camera.status === 'OFFLINE'
-                  ? 'Camera Feed Offline'
-                  : isNoFrame
-                  ? 'No Video Frames Received'
-                  : 'Awaiting Frame Ingestion'}
-              </div>
-              <div className="text-[11px] text-slate-400 max-w-xs">
-                {camera.source_type === 'MOBILE'
-                  ? 'Open the mobile camera link on your smartphone to stream live classroom video.'
-                  : camera.source_type === 'RTSP'
-                  ? 'Ensure RTSP IP camera endpoint is reachable on the local network.'
-                  : 'Play video file to feed frames into the AI recognition pipeline.'}
-              </div>
-            </div>
+            </>
           )}
         </div>
       )}

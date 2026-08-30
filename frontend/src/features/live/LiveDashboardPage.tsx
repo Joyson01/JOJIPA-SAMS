@@ -54,6 +54,7 @@ export const LiveDashboardPage: React.FC<LiveDashboardProps> = ({ onNavigate }) 
   const [videoResolution, setVideoResolution] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
   const [debugMode, setDebugMode] = useState<boolean>(false);
   const [mjpegTimestamp, setMjpegTimestamp] = useState<number>(Date.now());
+  const [hasReceivedRemoteFrames, setHasReceivedRemoteFrames] = useState<boolean>(false);
 
   // Presence & AI Telemetry State
   const [presenceList, setPresenceList] = useState<StudentPresenceItem[]>([]);
@@ -65,9 +66,11 @@ export const LiveDashboardPage: React.FC<LiveDashboardProps> = ({ onNavigate }) 
   // DOM Refs
   const videoRef = useRef<HTMLVideoElement>(null);
   const mjpegImgRef = useRef<HTMLImageElement>(null);
+  const remoteCanvasRef = useRef<HTMLCanvasElement>(null);
   const captureCanvasRef = useRef<HTMLCanvasElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const wsDownlinkRef = useRef<WebSocket | null>(null);
   const recognitionIntervalRef = useRef<any>(null);
   const presencePollIntervalRef = useRef<any>(null);
   const cameraPollIntervalRef = useRef<any>(null);
@@ -111,7 +114,7 @@ export const LiveDashboardPage: React.FC<LiveDashboardProps> = ({ onNavigate }) 
 
   useEffect(() => {
     loadResources();
-    // Refresh camera health telemetry every 5 seconds
+    // Refresh camera health telemetry every 4 seconds
     cameraPollIntervalRef.current = setInterval(async () => {
       try {
         const camList = await fetchCameras();
@@ -119,7 +122,7 @@ export const LiveDashboardPage: React.FC<LiveDashboardProps> = ({ onNavigate }) 
       } catch (e) {
         // silent
       }
-    }, 5000);
+    }, 4000);
 
     return () => {
       if (cameraPollIntervalRef.current) clearInterval(cameraPollIntervalRef.current);
@@ -226,6 +229,10 @@ export const LiveDashboardPage: React.FC<LiveDashboardProps> = ({ onNavigate }) 
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
+    if (wsDownlinkRef.current) {
+      wsDownlinkRef.current.close();
+      wsDownlinkRef.current = null;
+    }
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
@@ -236,6 +243,7 @@ export const LiveDashboardPage: React.FC<LiveDashboardProps> = ({ onNavigate }) 
     setCameraState('IDLE');
     setVideoResolution({ width: 0, height: 0 });
     setActiveFacesDetected(0);
+    setHasReceivedRemoteFrames(false);
   };
 
   // Start Live Attendance with Selected Registered Camera
@@ -251,12 +259,17 @@ export const LiveDashboardPage: React.FC<LiveDashboardProps> = ({ onNavigate }) 
 
     setCameraState('STARTING');
     setCameraError(null);
+    setHasReceivedRemoteFrames(false);
 
     try {
       // 1. Clean up any prior streams
       if (streamRef.current) {
         streamRef.current.getTracks().forEach((t) => t.stop());
         streamRef.current = null;
+      }
+      if (wsDownlinkRef.current) {
+        wsDownlinkRef.current.close();
+        wsDownlinkRef.current = null;
       }
 
       if (selectedCamera.source_type === 'WEBCAM') {
@@ -284,19 +297,51 @@ export const LiveDashboardPage: React.FC<LiveDashboardProps> = ({ onNavigate }) 
             console.warn('Initial video.play() resolved after load:', playErr);
           }
         }
-      } else if (selectedCamera.source_type === 'MOBILE') {
-        // CASE 2: MOBILE CAMERA
-        // Connect to mobile stream via MJPEG endpoint / frame polling
-        setMjpegTimestamp(Date.now());
-      } else if (selectedCamera.source_type === 'RTSP') {
-        // CASE 3: CCTV / RTSP
-        // Trigger server worker startup if needed
-        try {
-          await apiClient.post(`/cameras/${selectedCamera.id}/start`);
-        } catch (startErr) {
-          console.warn('CCTV worker auto-start notice:', startErr);
+      } else {
+        // CASE 2 & 3: REMOTE MOBILE OR CCTV RTSP
+        if (selectedCamera.source_type === 'RTSP') {
+          try {
+            await apiClient.post(`/cameras/${selectedCamera.id}/start`);
+          } catch (startErr) {
+            console.warn('CCTV worker auto-start notice:', startErr);
+          }
         }
+
         setMjpegTimestamp(Date.now());
+
+        // Connect WebSocket Downlink for ultra-low latency frame reception
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.host;
+        const wsUrl = `${protocol}//${host}/api/v1/cameras/${selectedCamera.id}/laptop-stream`;
+
+        try {
+          const ws = new WebSocket(wsUrl);
+          ws.binaryType = 'blob';
+
+          ws.onmessage = (event) => {
+            if (event.data instanceof Blob) {
+              setHasReceivedRemoteFrames(true);
+              const blobUrl = URL.createObjectURL(event.data);
+              const img = new Image();
+              img.onload = () => {
+                const canvas = remoteCanvasRef.current;
+                if (canvas) {
+                  canvas.width = img.naturalWidth || 640;
+                  canvas.height = img.naturalHeight || 480;
+                  setVideoResolution({ width: canvas.width, height: canvas.height });
+                  const ctx = canvas.getContext('2d');
+                  if (ctx) ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                }
+                URL.revokeObjectURL(blobUrl);
+              };
+              img.src = blobUrl;
+            }
+          };
+
+          wsDownlinkRef.current = ws;
+        } catch (wsErr) {
+          console.warn('WebSocket downlink setup notice:', wsErr);
+        }
       }
 
       setCameraState('STREAMING');
@@ -353,36 +398,48 @@ export const LiveDashboardPage: React.FC<LiveDashboardProps> = ({ onNavigate }) 
         isProcessingRef.current = false;
       }, 'image/jpeg', 0.85);
     } else {
-      // Process Remote Stream (Mobile or CCTV RTSP)
+      // Process Remote Stream (from remote canvas or MJPEG element)
+      const remoteCanvas = remoteCanvasRef.current;
       const img = mjpegImgRef.current;
-      const canvas = captureCanvasRef.current;
-      if (!img || !canvas || !img.naturalWidth || !img.naturalHeight) return;
+      const captureCanvas = captureCanvasRef.current;
+      if (!captureCanvas) return;
 
-      setVideoResolution({ width: img.naturalWidth, height: img.naturalHeight });
-      isProcessingRef.current = true;
-      canvas.width = img.naturalWidth;
-      canvas.height = img.naturalHeight;
+      let sourceWidth = 0;
+      let sourceHeight = 0;
+      const ctx = captureCanvas.getContext('2d');
+      if (!ctx) return;
 
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        isProcessingRef.current = false;
+      if (hasReceivedRemoteFrames && remoteCanvas && remoteCanvas.width > 0) {
+        sourceWidth = remoteCanvas.width;
+        sourceHeight = remoteCanvas.height;
+        captureCanvas.width = sourceWidth;
+        captureCanvas.height = sourceHeight;
+        ctx.drawImage(remoteCanvas, 0, 0, sourceWidth, sourceHeight);
+      } else if (img && img.naturalWidth > 0) {
+        sourceWidth = img.naturalWidth;
+        sourceHeight = img.naturalHeight;
+        captureCanvas.width = sourceWidth;
+        captureCanvas.height = sourceHeight;
+        try {
+          ctx.drawImage(img, 0, 0, sourceWidth, sourceHeight);
+        } catch (e) {
+          return;
+        }
+      } else {
         return;
       }
 
-      try {
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        canvas.toBlob(async (blob) => {
-          if (!blob) {
-            isProcessingRef.current = false;
-            return;
-          }
-          await sendFrameToRecognition(blob, img.naturalWidth, img.naturalHeight, false);
+      setVideoResolution({ width: sourceWidth, height: sourceHeight });
+      isProcessingRef.current = true;
+
+      captureCanvas.toBlob(async (blob) => {
+        if (!blob) {
           isProcessingRef.current = false;
-        }, 'image/jpeg', 0.85);
-      } catch (canvasErr) {
-        // Cross-origin image read if any
+          return;
+        }
+        await sendFrameToRecognition(blob, sourceWidth, sourceHeight, false);
         isProcessingRef.current = false;
-      }
+      }, 'image/jpeg', 0.85);
     }
   };
 
@@ -442,7 +499,7 @@ export const LiveDashboardPage: React.FC<LiveDashboardProps> = ({ onNavigate }) 
   const awayCount = presenceList.filter((p) => p.presence_state !== 'PRESENT_AND_VISIBLE').length;
 
   const isRemoteSource = selectedCamera && (selectedCamera.source_type === 'MOBILE' || selectedCamera.source_type === 'RTSP');
-  const isMobileNoFrame = selectedCamera?.source_type === 'MOBILE' && selectedCamera.status === 'NO_FRAME';
+  const isMobileNoFrame = selectedCamera?.source_type === 'MOBILE' && selectedCamera.status === 'NO_FRAME' && !hasReceivedRemoteFrames;
 
   const mjpegUrl = selectedCamera
     ? `/api/v1/cameras/${selectedCamera.id}/mjpeg?t=${mjpegTimestamp}`
@@ -686,25 +743,36 @@ export const LiveDashboardPage: React.FC<LiveDashboardProps> = ({ onNavigate }) 
                 />
               )}
 
-              {/* FEED 2 & 3: REMOTE MOBILE / CCTV RTSP MJPEG STREAM */}
+              {/* FEED 2 & 3: REMOTE MOBILE / CCTV RTSP STREAM */}
               {isRemoteSource && (
-                <img
-                  ref={mjpegImgRef}
-                  src={cameraState === 'STREAMING' ? mjpegUrl : ''}
-                  alt="Live Camera Stream"
-                  crossOrigin="anonymous"
-                  onLoad={() => {
-                    if (mjpegImgRef.current) {
-                      setVideoResolution({
-                        width: mjpegImgRef.current.naturalWidth,
-                        height: mjpegImgRef.current.naturalHeight,
-                      });
-                    }
-                  }}
-                  className={`w-full h-full object-contain ${
-                    cameraState === 'STREAMING' && !isMobileNoFrame ? 'block' : 'hidden'
-                  }`}
-                />
+                <>
+                  <canvas
+                    ref={remoteCanvasRef}
+                    className={`w-full h-full object-contain ${
+                      cameraState === 'STREAMING' && hasReceivedRemoteFrames ? 'block' : 'hidden'
+                    }`}
+                  />
+
+                  {!hasReceivedRemoteFrames && (
+                    <img
+                      ref={mjpegImgRef}
+                      src={cameraState === 'STREAMING' ? mjpegUrl : ''}
+                      alt="Live Remote Stream"
+                      crossOrigin="anonymous"
+                      onLoad={() => {
+                        if (mjpegImgRef.current && mjpegImgRef.current.naturalWidth > 0) {
+                          setVideoResolution({
+                            width: mjpegImgRef.current.naturalWidth,
+                            height: mjpegImgRef.current.naturalHeight,
+                          });
+                        }
+                      }}
+                      className={`w-full h-full object-contain ${
+                        cameraState === 'STREAMING' && !isMobileNoFrame ? 'block' : 'hidden'
+                      }`}
+                    />
+                  )}
+                </>
               )}
 
               {/* Canvas Overlays for Face Detection */}
@@ -751,7 +819,7 @@ export const LiveDashboardPage: React.FC<LiveDashboardProps> = ({ onNavigate }) 
                   <Smartphone className="w-10 h-10 mx-auto text-amber-400 animate-pulse" />
                   <p className="text-sm font-bold">Mobile Connected — Waiting for Video</p>
                   <p className="text-xs text-slate-300 max-w-sm">
-                    The mobile device is paired. Please tap "Start Stream" on the mobile phone camera page to transmit frames.
+                    The mobile device is paired. Please tap "Start Camera" on the mobile phone camera page to transmit frames.
                   </p>
                 </div>
               )}

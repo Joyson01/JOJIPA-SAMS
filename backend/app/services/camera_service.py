@@ -3,7 +3,7 @@ import secrets
 import socket
 import threading
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 import cv2
 import numpy as np
 from sqlalchemy import and_, select
@@ -29,6 +29,10 @@ _active_camera_workers: Dict[str, RTSPStreamWorker] = {}
 # Global in-memory atomic cache of latest frame per camera (for preview and AI ingestion)
 _latest_frame_cache: Dict[str, Tuple[np.ndarray, float]] = {}
 _frame_lock = threading.Lock()
+
+# Global registry of active laptop stream WebSocket subscribers per camera
+_camera_subscribers: Dict[str, set] = {}
+_subscriber_lock = threading.Lock()
 
 
 class CameraNotFoundError(SAMSException):
@@ -119,6 +123,55 @@ class CameraService:
         await db.refresh(camera)
         logger.info(f"Updated camera '{camera.name}' (ID: {camera.id})")
         return cls._serialize_camera(camera)
+
+    @classmethod
+    def add_subscriber(cls, camera_id: str, ws: Any) -> None:
+        with _subscriber_lock:
+            if camera_id not in _camera_subscribers:
+                _camera_subscribers[camera_id] = set()
+            _camera_subscribers[camera_id].add(ws)
+
+    @classmethod
+    def remove_subscriber(cls, camera_id: str, ws: Any) -> None:
+        with _subscriber_lock:
+            if camera_id in _camera_subscribers:
+                _camera_subscribers[camera_id].discard(ws)
+                if not _camera_subscribers[camera_id]:
+                    _camera_subscribers.pop(camera_id, None)
+
+    @classmethod
+    async def broadcast_frame(cls, camera_id: str, frame_bytes: bytes) -> None:
+        subscribers = []
+        with _subscriber_lock:
+            if camera_id in _camera_subscribers:
+                subscribers = list(_camera_subscribers[camera_id])
+        for ws in subscribers:
+            try:
+                await ws.send_bytes(frame_bytes)
+            except Exception:
+                cls.remove_subscriber(camera_id, ws)
+
+    @classmethod
+    async def broadcast_status(cls, camera_id: str, status_msg: Dict[str, Any]) -> None:
+        import json
+        subscribers = []
+        with _subscriber_lock:
+            if camera_id in _camera_subscribers:
+                subscribers = list(_camera_subscribers[camera_id])
+        for ws in subscribers:
+            try:
+                await ws.send_text(json.dumps(status_msg))
+            except Exception:
+                cls.remove_subscriber(camera_id, ws)
+
+    @classmethod
+    async def set_camera_offline(cls, db: AsyncSession, camera_id: str, status_label: str = "DISCONNECTED") -> None:
+        """Sets camera status to DISCONNECTED/OFFLINE and notifies subscribers."""
+        camera = await db.get(Camera, camera_id)
+        if camera:
+            camera.status = status_label
+            await db.commit()
+        await cls.broadcast_status(camera_id, {"type": "status", "status": status_label, "camera_id": camera_id})
 
     @classmethod
     async def record_frame_received(cls, db: AsyncSession, camera_id: str, frame: Optional[np.ndarray] = None) -> None:
@@ -286,7 +339,7 @@ class CameraService:
                 name=camera_name,
                 location=location,
                 source_type="MOBILE",
-                stream_url=f"mobile://{token[:8]}",
+                stream_url=None,
                 status="OFFLINE",
                 target_fps=15,
                 resolution="1280x720",
@@ -296,7 +349,6 @@ class CameraService:
             db.add(camera)
             await db.flush()
         else:
-            camera.stream_url = f"mobile://{token[:8]}"
             if assigned_class:
                 camera.assigned_class = assigned_class
 
