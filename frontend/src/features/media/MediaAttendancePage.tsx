@@ -13,6 +13,13 @@ import {
   FileVideo,
   FileImage,
   Plus,
+  AlertCircle,
+  AlertTriangle,
+  Info,
+  Check,
+  ArrowRight,
+  Sparkles,
+  Calendar,
 } from 'lucide-react';
 import { fetchSessions } from '../../services/attendanceApi';
 import { AttendanceSession } from '../../types/attendance';
@@ -29,15 +36,24 @@ import {
   MediaJobResponse,
 } from '../../types/mediaAttendance';
 
-export const MediaAttendancePage: React.FC = () => {
+interface MediaAttendancePageProps {
+  onNavigate?: (tab: string, extra?: any) => void;
+}
+
+export const MediaAttendancePage: React.FC<MediaAttendancePageProps> = ({ onNavigate }) => {
   const [activeTab, setActiveTab] = useState<'IMAGE' | 'VIDEO'>('IMAGE');
   const [sessions, setSessions] = useState<AttendanceSession[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string>('');
   const [loadingSessions, setLoadingSessions] = useState<boolean>(true);
 
+  // Status & Notifications (Replacing browser alert)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
   // Image Mode State
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
+  const [imageMetadata, setImageMetadata] = useState<{ dimensions: string; size: string } | null>(null);
   const [analyzingImage, setAnalyzingImage] = useState<boolean>(false);
   const [imageResult, setImageResult] = useState<MediaAnalysisResponse | null>(null);
 
@@ -61,6 +77,7 @@ export const MediaAttendancePage: React.FC = () => {
   // Load Sessions & Job History
   const loadData = useCallback(async () => {
     setLoadingSessions(true);
+    setErrorMessage(null);
     try {
       const [sessionList, jobList] = await Promise.all([
         fetchSessions(),
@@ -75,8 +92,9 @@ export const MediaAttendancePage: React.FC = () => {
       } else if (sessionList.length > 0) {
         setSelectedSessionId(sessionList[0].id);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load media attendance resources:', err);
+      setErrorMessage('Failed to connect to backend server. Please verify services are running.');
     } finally {
       setLoadingSessions(false);
     }
@@ -98,6 +116,11 @@ export const MediaAttendancePage: React.FC = () => {
             // Refresh history table
             const refreshedJobs = await fetchMediaJobs();
             setJobs(refreshedJobs);
+            if (updated.status === 'COMPLETED') {
+              setSuccessMessage(`Video processing completed! ${updated.attendance_marked_count} attendance records marked.`);
+            } else if (updated.status === 'FAILED') {
+              setErrorMessage(`Video processing failed: ${updated.error_message || 'Decoder error'}`);
+            }
           }
         } catch (e) {
           console.warn('Job poll error:', e);
@@ -112,14 +135,25 @@ export const MediaAttendancePage: React.FC = () => {
 
   // Handle Image Selection
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setErrorMessage(null);
+    setSuccessMessage(null);
     const file = e.target.files?.[0];
     if (!file) return;
 
     setImageFile(file);
     setImageResult(null);
 
+    const sizeKb = (file.size / 1024).toFixed(0);
     const reader = new FileReader();
     reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        setImageMetadata({
+          dimensions: `${img.width}x${img.height}`,
+          size: `${sizeKb} KB`,
+        });
+      };
+      img.src = reader.result as string;
       setImagePreviewUrl(reader.result as string);
     };
     reader.readAsDataURL(file);
@@ -127,6 +161,8 @@ export const MediaAttendancePage: React.FC = () => {
 
   // Handle Video Selection & Metadata Extraction
   const handleVideoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setErrorMessage(null);
+    setSuccessMessage(null);
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -152,7 +188,17 @@ export const MediaAttendancePage: React.FC = () => {
 
   // Submit Image Analysis
   const handleAnalyzeImage = async () => {
-    if (!imageFile || !selectedSessionId) return;
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    if (!selectedSessionId) {
+      setErrorMessage('Please select an attendance session first.');
+      return;
+    }
+    if (!imageFile) {
+      setErrorMessage('Please choose an image file to analyze.');
+      return;
+    }
 
     setAnalyzingImage(true);
     setImageResult(null);
@@ -161,8 +207,11 @@ export const MediaAttendancePage: React.FC = () => {
       setImageResult(res);
       const refreshedJobs = await fetchMediaJobs();
       setJobs(refreshedJobs);
+      setSuccessMessage(`Analysis complete: ${res.recognized_count} recognized, ${res.attendance_marked_count} attendance records marked.`);
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Image analysis failed.');
+      const detail = err.response?.data?.detail;
+      const msg = detail?.message || detail || 'Unable to analyze this image. Please verify format and try again.';
+      setErrorMessage(msg);
     } finally {
       setAnalyzingImage(false);
     }
@@ -170,7 +219,17 @@ export const MediaAttendancePage: React.FC = () => {
 
   // Submit Video Processing
   const handleAnalyzeVideo = async () => {
-    if (!videoFile || !selectedSessionId) return;
+    setErrorMessage(null);
+    setSuccessMessage(null);
+
+    if (!selectedSessionId) {
+      setErrorMessage('Please select an attendance session first.');
+      return;
+    }
+    if (!videoFile) {
+      setErrorMessage('Please choose a video file to process.');
+      return;
+    }
 
     setUploadingVideo(true);
     try {
@@ -179,7 +238,9 @@ export const MediaAttendancePage: React.FC = () => {
       const refreshedJobs = await fetchMediaJobs();
       setJobs(refreshedJobs);
     } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to submit video for processing.');
+      const detail = err.response?.data?.detail;
+      const msg = detail?.message || detail || 'Failed to submit video for processing.';
+      setErrorMessage(msg);
     } finally {
       setUploadingVideo(false);
     }
@@ -194,40 +255,89 @@ export const MediaAttendancePage: React.FC = () => {
       }
       const refreshedJobs = await fetchMediaJobs();
       setJobs(refreshedJobs);
+      setSuccessMessage('Video processing job cancelled.');
     } catch (err) {
-      alert('Could not cancel job.');
+      setErrorMessage('Could not cancel job.');
     }
   };
 
   // Delete Job
   const handleDeleteJob = async (jobId: string) => {
-    if (window.confirm('Delete this media processing record and file?')) {
-      try {
-        await deleteMediaJob(jobId);
-        if (activeVideoJob?.id === jobId) setActiveVideoJob(null);
-        if (selectedJobDetails?.id === jobId) setSelectedJobDetails(null);
-        setJobs((prev) => prev.filter((j) => j.id !== jobId));
-      } catch (err) {
-        alert('Failed to delete media job.');
-      }
+    try {
+      await deleteMediaJob(jobId);
+      if (activeVideoJob?.id === jobId) setActiveVideoJob(null);
+      if (selectedJobDetails?.id === jobId) setSelectedJobDetails(null);
+      setJobs((prev) => prev.filter((j) => j.id !== jobId));
+      setSuccessMessage('Media record deleted.');
+    } catch (err) {
+      setErrorMessage('Failed to delete media job.');
     }
   };
+
+  const selectedSession = sessions.find((s) => s.id === selectedSessionId);
+  const isSessionCompleted = selectedSession?.status === 'COMPLETED';
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Media Attendance</h1>
-        <p className="text-sm text-slate-500 mt-0.5">
-          Run attendance processing on an image or prerecorded video.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Media Attendance</h1>
+          <p className="text-sm text-slate-500 mt-0.5">
+            Process previously captured classroom group photos or pre-recorded lecture videos through the AI recognition engine.
+          </p>
+        </div>
+
+        {onNavigate && (
+          <button
+            onClick={() => onNavigate('attendance')}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition self-start sm:self-auto"
+          >
+            <span>View Attendance Sessions</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        )}
       </div>
 
-      {/* Tabs: Image vs Video */}
+      {/* In-App Notifications / Error Banner */}
+      {errorMessage && (
+        <div className="p-4 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-start justify-between gap-3 animate-in fade-in-50">
+          <div className="flex items-start gap-2.5">
+            <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+            <div>
+              <div className="font-bold">Error Processing Media</div>
+              <div className="text-[11px] text-rose-700 mt-0.5">{errorMessage}</div>
+            </div>
+          </div>
+          <button onClick={() => setErrorMessage(null)} className="text-rose-500 hover:text-rose-700 p-1">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {successMessage && (
+        <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs flex items-start justify-between gap-3 animate-in fade-in-50">
+          <div className="flex items-start gap-2.5">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+            <div>
+              <div className="font-bold">Success</div>
+              <div className="text-[11px] text-emerald-700 mt-0.5">{successMessage}</div>
+            </div>
+          </div>
+          <button onClick={() => setSuccessMessage(null)} className="text-emerald-500 hover:text-emerald-700 p-1">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Mode Switcher Tabs */}
       <div className="flex items-center gap-3 border-b border-slate-200 pb-3">
         <button
-          onClick={() => setActiveTab('IMAGE')}
-          className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition ${
+          onClick={() => {
+            setActiveTab('IMAGE');
+            setErrorMessage(null);
+          }}
+          className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition ${
             activeTab === 'IMAGE'
               ? 'bg-blue-600 text-white shadow-sm'
               : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
@@ -238,8 +348,11 @@ export const MediaAttendancePage: React.FC = () => {
         </button>
 
         <button
-          onClick={() => setActiveTab('VIDEO')}
-          className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition ${
+          onClick={() => {
+            setActiveTab('VIDEO');
+            setErrorMessage(null);
+          }}
+          className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition ${
             activeTab === 'VIDEO'
               ? 'bg-blue-600 text-white shadow-sm'
               : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
@@ -250,73 +363,118 @@ export const MediaAttendancePage: React.FC = () => {
         </button>
       </div>
 
-      {/* Session Selector Bar */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <label className="block text-xs font-bold text-slate-700 mb-1">Target Attendance Session *</label>
-          <p className="text-xs text-slate-400">Select the classroom session to record attendance against.</p>
+      {/* Target Session Selector Bar */}
+      <div className="bg-white border border-slate-200 rounded-3xl p-5 shadow-sm space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-0.5">
+            <label className="block text-xs font-bold text-slate-800 flex items-center gap-1.5">
+              <Calendar className="w-3.5 h-3.5 text-blue-600" />
+              <span>Target Attendance Session *</span>
+            </label>
+            <p className="text-xs text-slate-500">
+              Attendance records created from media will be linked directly to this session.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {loadingSessions ? (
+              <div className="text-xs text-slate-400 flex items-center gap-1.5">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-600" />
+                Loading sessions...
+              </div>
+            ) : sessions.length === 0 ? (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500">No attendance sessions available.</span>
+                {onNavigate && (
+                  <button
+                    onClick={() => onNavigate('attendance')}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-blue-50 text-blue-700 font-bold text-xs hover:bg-blue-100 transition border border-blue-200"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Create Session</span>
+                  </button>
+                )}
+              </div>
+            ) : (
+              <select
+                value={selectedSessionId}
+                onChange={(e) => {
+                  setSelectedSessionId(e.target.value);
+                  setErrorMessage(null);
+                }}
+                className="bg-slate-50 border border-slate-200 rounded-2xl px-4 py-2.5 text-xs font-bold text-slate-900 focus:bg-white focus:outline-none focus:border-blue-500 shadow-xs"
+              >
+                {sessions.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.subject} · {s.class_name} ({s.scheduled_date}) — [{s.status}]
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {loadingSessions ? (
-            <div className="text-xs text-slate-400 flex items-center gap-1.5">
-              <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-600" />
-              Loading sessions...
-            </div>
-          ) : sessions.length === 0 ? (
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-slate-500">No attendance sessions available.</span>
-              <a
-                href="/attendance"
-                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-blue-50 text-blue-700 font-bold text-xs hover:bg-blue-100 transition"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Create Session</span>
-              </a>
-            </div>
-          ) : (
-            <select
-              value={selectedSessionId}
-              onChange={(e) => setSelectedSessionId(e.target.value)}
-              className="bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-semibold text-slate-900 focus:bg-white focus:outline-none focus:border-blue-500 shadow-inner"
-            >
-              {sessions.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.subject} ({s.class_name}) - [{s.status}]
-                </option>
-              ))}
-            </select>
-          )}
-        </div>
+        {/* Completed Session Warning Alert */}
+        {isSessionCompleted && (
+          <div className="p-3 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800 text-xs flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>
+              <strong className="font-bold">Historical Session Notice:</strong> This session is marked as <strong className="font-bold">COMPLETED</strong>. Processing media will append new verified attendance records to this finalized session.
+            </span>
+          </div>
+        )}
       </div>
 
+      {/* ========================================================================= */}
       {/* TAB 1: IMAGE ATTENDANCE */}
+      {/* ========================================================================= */}
       {activeTab === 'IMAGE' && (
         <div className="space-y-6">
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
-            <h2 className="text-base font-bold text-slate-900">Upload Classroom Photo</h2>
-            <p className="text-xs text-slate-500">
-              Upload a group photo or single student portrait. Faces are detected, aligned, quality-filtered, and matched with enrolled gallery embeddings.
-            </p>
+          <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
+            <div className="space-y-1">
+              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <ImageIcon className="w-4 h-4 text-blue-600" />
+                <span>Upload Classroom Photo</span>
+              </h2>
+              <p className="text-xs text-slate-500">
+                Upload a group classroom photo or portrait (JPEG, PNG, WEBP). Multiple students in a single frame are detected, aligned, quality-filtered, and evaluated independently.
+              </p>
+            </div>
 
-            <div className="flex flex-col sm:flex-row items-center gap-4">
+            {/* Passive Liveness Limitation Note */}
+            <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200 text-slate-600 text-xs flex items-start gap-2">
+              <Info className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
+              <span>
+                <strong>Image Verification Note:</strong> Liveness cannot be reliably established from a single still image (single-frame evidence). Faces are evaluated based on facial structure and embedding similarity against enrolled biometric templates.
+              </span>
+            </div>
+
+            <div className="flex flex-col sm:flex-row items-center gap-4 pt-2">
               <label className="cursor-pointer inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold transition border border-blue-200">
                 <Upload className="w-4 h-4" />
-                <span>Choose Image (JPG, PNG, WebM)</span>
+                <span>Choose Image (JPG, PNG, WEBP)</span>
                 <input type="file" accept="image/jpeg,image/png,image/webp" onChange={handleImageSelect} className="hidden" />
               </label>
 
               {imageFile && (
-                <span className="text-xs font-mono text-slate-600 truncate max-w-xs">
-                  ✓ {imageFile.name} ({(imageFile.size / 1024).toFixed(0)} KB)
-                </span>
+                <div className="text-xs font-mono text-slate-600 flex items-center gap-2">
+                  <span className="font-bold text-emerald-600 flex items-center gap-1">
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Selected: {imageFile.name}</span>
+                  </span>
+                  {imageMetadata && (
+                    <span className="text-slate-400">
+                      ({imageMetadata.dimensions} · {imageMetadata.size})
+                    </span>
+                  )}
+                </div>
               )}
             </div>
 
             {/* Image Preview & Action */}
             {imagePreviewUrl && (
               <div className="space-y-4 pt-2">
-                <div className="relative max-h-96 rounded-xl overflow-hidden border border-slate-200 bg-slate-950 flex items-center justify-center shadow-inner">
+                <div className="relative max-h-96 rounded-2xl overflow-hidden border border-slate-200 bg-slate-950 flex items-center justify-center shadow-inner">
                   <img src={imagePreviewUrl} alt="Classroom Preview" className="max-h-96 object-contain" />
                 </div>
 
@@ -324,7 +482,7 @@ export const MediaAttendancePage: React.FC = () => {
                   <button
                     onClick={handleAnalyzeImage}
                     disabled={analyzingImage || !selectedSessionId}
-                    className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md transition disabled:opacity-50"
+                    className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm transition disabled:opacity-50"
                   >
                     {analyzingImage ? (
                       <>
@@ -345,69 +503,78 @@ export const MediaAttendancePage: React.FC = () => {
 
           {/* Image Analysis Results */}
           {imageResult && (
-            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-5">
+            <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-5 animate-in fade-in-50">
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <div>
-                  <h3 className="text-base font-bold text-slate-900">Image Processing Results</h3>
-                  <p className="text-xs text-slate-500">
-                    Session: {imageResult.session_subject} ({imageResult.session_class}) · Latency: {imageResult.processing_time_ms} ms
+                  <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-blue-600" />
+                    <span>Image Analysis Complete</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Session: <strong className="text-slate-800">{imageResult.session_subject}</strong> ({imageResult.session_class}) · Latency: {imageResult.processing_time_ms} ms
                   </p>
                 </div>
-                <span className="px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-200 flex items-center gap-1.5">
+                <span className="px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-200 flex items-center gap-1.5">
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Completed</span>
+                  <span>Processing Done</span>
                 </span>
               </div>
 
               {/* Stat Summary Metrics */}
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-                <div className="bg-slate-50 border border-slate-100 rounded-xl p-3 text-center">
-                  <div className="text-[11px] text-slate-400 font-medium">Faces Detected</div>
-                  <div className="text-lg font-bold text-slate-900 mt-0.5">{imageResult.faces_detected}</div>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-center">
+                <div className="bg-slate-50 border border-slate-200/70 rounded-2xl p-3.5">
+                  <div className="text-[10px] uppercase font-bold text-slate-400">Faces Detected</div>
+                  <div className="text-xl font-black text-slate-900 mt-1">{imageResult.faces_detected}</div>
                 </div>
-                <div className="bg-emerald-50/60 border border-emerald-100 rounded-xl p-3 text-center">
-                  <div className="text-[11px] text-emerald-600 font-medium">Recognized</div>
-                  <div className="text-lg font-bold text-emerald-700 mt-0.5">{imageResult.recognized_count}</div>
+                <div className="bg-emerald-50/70 border border-emerald-200/60 rounded-2xl p-3.5">
+                  <div className="text-[10px] uppercase font-bold text-emerald-600">Recognized</div>
+                  <div className="text-xl font-black text-emerald-700 mt-1">{imageResult.recognized_count}</div>
                 </div>
-                <div className="bg-blue-50/60 border border-blue-100 rounded-xl p-3 text-center">
-                  <div className="text-[11px] text-blue-600 font-medium">Attendance Marked</div>
-                  <div className="text-lg font-bold text-blue-700 mt-0.5">{imageResult.attendance_marked_count}</div>
+                <div className="bg-blue-50/70 border border-blue-200/60 rounded-2xl p-3.5">
+                  <div className="text-[10px] uppercase font-bold text-blue-600">Attendance Marked</div>
+                  <div className="text-xl font-black text-blue-700 mt-1">{imageResult.attendance_marked_count}</div>
                 </div>
-                <div className="bg-amber-50/60 border border-amber-100 rounded-xl p-3 text-center">
-                  <div className="text-[11px] text-amber-600 font-medium">Uncertain</div>
-                  <div className="text-lg font-bold text-amber-700 mt-0.5">{imageResult.uncertain_count}</div>
+                <div className="bg-amber-50/70 border border-amber-200/60 rounded-2xl p-3.5">
+                  <div className="text-[10px] uppercase font-bold text-amber-600">Uncertain</div>
+                  <div className="text-xl font-black text-amber-700 mt-1">{imageResult.uncertain_count}</div>
                 </div>
-                <div className="bg-slate-100 border border-slate-200 rounded-xl p-3 text-center">
-                  <div className="text-[11px] text-slate-500 font-medium">Unknown</div>
-                  <div className="text-lg font-bold text-slate-700 mt-0.5">{imageResult.unknown_count}</div>
+                <div className="bg-rose-50/70 border border-rose-200/60 rounded-2xl p-3.5">
+                  <div className="text-[10px] uppercase font-bold text-rose-600">Unknown</div>
+                  <div className="text-xl font-black text-rose-700 mt-1">{imageResult.unknown_count}</div>
                 </div>
               </div>
 
               {/* Table of Recognized Students */}
-              {imageResult.recognized_students.length > 0 && (
+              {imageResult.recognized_students.length > 0 ? (
                 <div className="space-y-2">
                   <h4 className="text-xs font-bold text-slate-800">Verified Students Marked Present</h4>
-                  <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                  <div className="overflow-x-auto border border-slate-200 rounded-2xl">
                     <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-50 text-slate-500 border-b border-slate-200 font-semibold">
+                      <thead className="bg-slate-50 text-slate-500 border-b border-slate-200 font-bold uppercase text-[10px]">
                         <tr>
                           <th className="p-3">Student Name</th>
                           <th className="p-3">Roll / Code</th>
                           <th className="p-3">Confidence</th>
+                          <th className="p-3">Decision</th>
                           <th className="p-3">Attendance Status</th>
                           <th className="p-3">Remarks</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 text-slate-700">
                         {imageResult.recognized_students.map((st, idx) => (
-                          <tr key={idx} className="hover:bg-slate-50/50">
+                          <tr key={idx} className="hover:bg-slate-50/70 transition">
                             <td className="p-3 font-bold text-slate-900">{st.student_name}</td>
                             <td className="p-3 font-mono text-[11px] text-slate-500">
                               {st.roll_number || st.student_code || '—'}
                             </td>
                             <td className="p-3 font-mono font-bold text-emerald-600">{st.confidence_pct}%</td>
                             <td className="p-3">
-                              <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold">
+                              <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 font-bold text-[10px] border border-emerald-100">
+                                {st.decision}
+                              </span>
+                            </td>
+                            <td className="p-3">
+                              <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold">
                                 {st.attendance_status}
                               </span>
                             </td>
@@ -418,28 +585,32 @@ export const MediaAttendancePage: React.FC = () => {
                     </table>
                   </div>
                 </div>
+              ) : (
+                <div className="p-6 text-center text-slate-400 text-xs border border-slate-200 rounded-2xl bg-slate-50">
+                  No registered student identities matched above the confidence threshold in this photo.
+                </div>
               )}
 
               {/* Unresolved Faces Review Section */}
               {imageResult.unresolved_faces.length > 0 && (
-                <div className="space-y-2 pt-2 border-t border-slate-100">
+                <div className="space-y-2 pt-3 border-t border-slate-100">
                   <h4 className="text-xs font-bold text-slate-800 flex items-center gap-2">
                     <HelpCircle className="w-3.5 h-3.5 text-amber-500" />
                     <span>Unresolved / Non-Enrolled Faces ({imageResult.unresolved_faces.length})</span>
                   </h4>
-                  <p className="text-xs text-slate-400">
-                    These faces did not meet the confidence threshold or are not registered in the student gallery. No attendance was marked.
+                  <p className="text-[11px] text-slate-400">
+                    These faces did not meet the match threshold or are not registered in the student gallery. No attendance was recorded for these individuals.
                   </p>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                     {imageResult.unresolved_faces.map((unres, idx) => (
                       <div
                         key={idx}
-                        className="p-3 rounded-xl border border-slate-200 bg-slate-50/60 text-xs space-y-1"
+                        className="p-3 rounded-2xl border border-slate-200 bg-slate-50/70 text-xs space-y-1"
                       >
                         <div className="flex items-center justify-between font-bold text-slate-800">
                           <span>{unres.face_id}</span>
                           <span
-                            className={`px-1.5 py-0.5 rounded text-[10px] ${
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                               unres.decision === 'UNCERTAIN'
                                 ? 'bg-amber-100 text-amber-800'
                                 : 'bg-slate-200 text-slate-700'
@@ -448,8 +619,8 @@ export const MediaAttendancePage: React.FC = () => {
                             {unres.decision}
                           </span>
                         </div>
-                        <div className="text-[11px] text-slate-500">
-                          Quality Score: {unres.quality_score} · Conf: {unres.confidence_pct}%
+                        <div className="text-[11px] text-slate-500 font-mono">
+                          Quality: {unres.quality_score} · Conf: {unres.confidence_pct}%
                         </div>
                         <div className="text-[10px] text-slate-400 truncate">{unres.rejection_reason}</div>
                       </div>
@@ -462,16 +633,23 @@ export const MediaAttendancePage: React.FC = () => {
         </div>
       )}
 
+      {/* ========================================================================= */}
       {/* TAB 2: VIDEO ATTENDANCE */}
+      {/* ========================================================================= */}
       {activeTab === 'VIDEO' && (
         <div className="space-y-6">
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
-            <h2 className="text-base font-bold text-slate-900">Upload Recorded Classroom Video</h2>
-            <p className="text-xs text-slate-500">
-              Upload a recorded lecture (MP4, AVI, MKV, WebM). Frames are sampled at configurable FPS, tracked sequentially with ByteTrack, temporally verified, and logged once per student.
-            </p>
+          <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
+            <div className="space-y-1">
+              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                <Film className="w-4 h-4 text-blue-600" />
+                <span>Upload Recorded Classroom Video</span>
+              </h2>
+              <p className="text-xs text-slate-500">
+                Upload a recorded lecture (MP4, AVI, MKV, WebM, MOV). The video is sampled at controlled FPS, faces are tracked across frames with temporal verification, and exactly ONE attendance record is recorded per student.
+              </p>
+            </div>
 
-            <div className="flex flex-col sm:flex-row items-center gap-4">
+            <div className="flex flex-col sm:flex-row items-center gap-4 pt-2">
               <label className="cursor-pointer inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold transition border border-blue-200">
                 <Upload className="w-4 h-4" />
                 <span>Choose Video File (MP4, AVI, MKV, MOV)</span>
@@ -479,26 +657,27 @@ export const MediaAttendancePage: React.FC = () => {
               </label>
 
               {videoFile && (
-                <span className="text-xs font-mono text-slate-600 truncate max-w-xs">
-                  ✓ {videoFile.name}
-                </span>
+                <div className="text-xs font-mono text-slate-600 font-bold text-emerald-600 flex items-center gap-1">
+                  <Check className="w-3.5 h-3.5" />
+                  <span>Selected: {videoFile.name}</span>
+                </div>
               )}
             </div>
 
             {/* Video Metadata Card */}
             {videoMetadata && (
-              <div className="grid grid-cols-3 gap-3 bg-slate-50 border border-slate-200 rounded-xl p-3.5 text-center text-xs">
+              <div className="grid grid-cols-3 gap-3 bg-slate-50 border border-slate-200 rounded-2xl p-4 text-center text-xs">
                 <div>
-                  <div className="text-slate-400 text-[10px]">Duration</div>
-                  <div className="font-bold text-slate-800 mt-0.5">{videoMetadata.duration}</div>
+                  <div className="text-slate-400 text-[10px] font-bold uppercase">Duration</div>
+                  <div className="font-black text-slate-800 mt-1">{videoMetadata.duration}</div>
                 </div>
                 <div>
-                  <div className="text-slate-400 text-[10px]">Resolution</div>
-                  <div className="font-bold text-slate-800 mt-0.5">{videoMetadata.resolution}</div>
+                  <div className="text-slate-400 text-[10px] font-bold uppercase">Resolution</div>
+                  <div className="font-black text-slate-800 mt-1">{videoMetadata.resolution}</div>
                 </div>
                 <div>
-                  <div className="text-slate-400 text-[10px]">File Size</div>
-                  <div className="font-bold text-slate-800 mt-0.5">{videoMetadata.size}</div>
+                  <div className="text-slate-400 text-[10px] font-bold uppercase">File Size</div>
+                  <div className="font-black text-slate-800 mt-1">{videoMetadata.size}</div>
                 </div>
               </div>
             )}
@@ -507,11 +686,11 @@ export const MediaAttendancePage: React.FC = () => {
             {videoFile && (
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-3 border-t border-slate-100">
                 <div className="flex items-center gap-2 text-xs">
-                  <label className="font-semibold text-slate-700">Analysis Sampling Rate:</label>
+                  <label className="font-bold text-slate-700">Analysis Sampling Rate:</label>
                   <select
                     value={sampleFps}
                     onChange={(e) => setSampleFps(parseFloat(e.target.value))}
-                    className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-800"
+                    className="bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-semibold text-slate-800 focus:outline-none focus:border-blue-500"
                   >
                     <option value="1.0">1 FPS (Fastest / Low Density)</option>
                     <option value="2.0">2 FPS (Balanced)</option>
@@ -523,7 +702,7 @@ export const MediaAttendancePage: React.FC = () => {
                 <button
                   onClick={handleAnalyzeVideo}
                   disabled={uploadingVideo || !selectedSessionId || activeVideoJob?.status === 'PROCESSING'}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-md transition disabled:opacity-50"
+                  className="inline-flex items-center gap-2 px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm transition disabled:opacity-50"
                 >
                   {uploadingVideo ? (
                     <>
@@ -543,18 +722,21 @@ export const MediaAttendancePage: React.FC = () => {
 
           {/* Active Job Progress View */}
           {activeVideoJob && (
-            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
+            <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-5 animate-in fade-in-50">
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <div>
-                  <h3 className="text-base font-bold text-slate-900">Video Processing Status</h3>
-                  <p className="text-xs text-slate-500">
-                    {activeVideoJob.filename} · {activeVideoJob.resolution} · {activeVideoJob.duration_sec}s
+                  <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-blue-600" />
+                    <span>{activeVideoJob.status === 'COMPLETED' ? 'Video Analysis Complete' : 'Video Processing in Progress'}</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {activeVideoJob.filename} · {activeVideoJob.resolution} · Duration: {activeVideoJob.duration_sec}s
                   </p>
                 </div>
 
                 <div className="flex items-center gap-2">
                   <span
-                    className={`px-2.5 py-1 rounded-full text-xs font-bold ${
+                    className={`px-3 py-1 rounded-full text-xs font-bold ${
                       activeVideoJob.status === 'COMPLETED'
                         ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                         : activeVideoJob.status === 'PROCESSING'
@@ -570,10 +752,10 @@ export const MediaAttendancePage: React.FC = () => {
                   {activeVideoJob.status === 'PROCESSING' && (
                     <button
                       onClick={() => handleCancelJob(activeVideoJob.id)}
-                      className="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold transition border border-rose-200"
+                      className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold transition border border-rose-200"
                     >
                       <StopCircle className="w-3.5 h-3.5" />
-                      <span>Cancel</span>
+                      <span>Cancel Processing</span>
                     </button>
                   )}
                 </div>
@@ -581,11 +763,11 @@ export const MediaAttendancePage: React.FC = () => {
 
               {/* Progress Bar */}
               <div className="space-y-1.5">
-                <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
+                <div className="flex items-center justify-between text-xs font-bold text-slate-700">
                   <span>Processing Progress</span>
                   <span>{activeVideoJob.progress_pct}%</span>
                 </div>
-                <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden border border-slate-200">
+                <div className="w-full bg-slate-100 rounded-full h-3.5 overflow-hidden border border-slate-200">
                   <div
                     className="bg-blue-600 h-full rounded-full transition-all duration-500"
                     style={{ width: `${activeVideoJob.progress_pct}%` }}
@@ -595,54 +777,58 @@ export const MediaAttendancePage: React.FC = () => {
 
               {/* Real Telemetry Counter */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center text-xs">
-                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                  <div className="text-slate-400 text-[10px]">Frames Processed</div>
-                  <div className="font-bold text-slate-800 mt-0.5">
+                <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200/70">
+                  <div className="text-slate-400 text-[10px] font-bold uppercase">Frames Processed</div>
+                  <div className="font-black text-slate-800 text-base mt-0.5">
                     {activeVideoJob.frames_processed} / {activeVideoJob.frames_total}
                   </div>
                 </div>
-                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
-                  <div className="text-slate-400 text-[10px]">Faces Tracked</div>
-                  <div className="font-bold text-slate-800 mt-0.5">{activeVideoJob.faces_detected_total}</div>
+                <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-200/70">
+                  <div className="text-slate-400 text-[10px] font-bold uppercase">Faces Tracked</div>
+                  <div className="font-black text-slate-800 text-base mt-0.5">{activeVideoJob.faces_detected_total}</div>
                 </div>
-                <div className="bg-emerald-50 p-3 rounded-xl border border-emerald-100">
-                  <div className="text-emerald-600 text-[10px]">Recognized Students</div>
-                  <div className="font-bold text-emerald-700 mt-0.5">{activeVideoJob.recognized_count}</div>
+                <div className="bg-emerald-50 p-3.5 rounded-2xl border border-emerald-200/60">
+                  <div className="text-emerald-600 text-[10px] font-bold uppercase">Recognized Students</div>
+                  <div className="font-black text-emerald-700 text-base mt-0.5">{activeVideoJob.recognized_count}</div>
                 </div>
-                <div className="bg-blue-50 p-3 rounded-xl border border-blue-100">
-                  <div className="text-blue-600 text-[10px]">Attendance Marked</div>
-                  <div className="font-bold text-blue-700 mt-0.5">{activeVideoJob.attendance_marked_count}</div>
+                <div className="bg-blue-50 p-3.5 rounded-2xl border border-blue-200/60">
+                  <div className="text-blue-600 text-[10px] font-bold uppercase">Attendance Marked</div>
+                  <div className="font-black text-blue-700 text-base mt-0.5">{activeVideoJob.attendance_marked_count}</div>
                 </div>
               </div>
 
               {/* Completed Video Summary */}
               {activeVideoJob.status === 'COMPLETED' && activeVideoJob.summary_json?.recognized && (
                 <div className="space-y-3 pt-3 border-t border-slate-100">
-                  <h4 className="text-xs font-bold text-slate-800">Verified Students Marked Present</h4>
-                  <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                  <h4 className="text-xs font-bold text-slate-800">Verified Students Marked Present ({activeVideoJob.summary_json.recognized.length})</h4>
+                  <div className="overflow-x-auto border border-slate-200 rounded-2xl">
                     <table className="w-full text-left text-xs">
-                      <thead className="bg-slate-50 text-slate-500 border-b border-slate-200 font-semibold">
+                      <thead className="bg-slate-50 text-slate-500 border-b border-slate-200 font-bold uppercase text-[10px]">
                         <tr>
                           <th className="p-3">Student Name</th>
-                          <th className="p-3">Time Span</th>
+                          <th className="p-3">Roll / Code</th>
+                          <th className="p-3">Time Span (First - Last)</th>
                           <th className="p-3">Observations</th>
-                          <th className="p-3">Max Confidence</th>
+                          <th className="p-3">Best Confidence</th>
                           <th className="p-3">Status</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 text-slate-700">
                         {activeVideoJob.summary_json.recognized.map((st, idx) => (
-                          <tr key={idx} className="hover:bg-slate-50/50">
+                          <tr key={idx} className="hover:bg-slate-50/70 transition">
                             <td className="p-3 font-bold text-slate-900">{st.student_name}</td>
                             <td className="p-3 font-mono text-[11px] text-slate-500">
-                              {st.first_seen} - {st.last_seen}
+                              {st.roll_number || st.student_code || '—'}
+                            </td>
+                            <td className="p-3 font-mono text-[11px] text-slate-600">
+                              {st.first_seen} – {st.last_seen}
                             </td>
                             <td className="p-3 font-mono text-[11px] font-semibold text-slate-700">
                               {st.observation_count} frames
                             </td>
                             <td className="p-3 font-mono font-bold text-emerald-600">{st.confidence_pct}%</td>
                             <td className="p-3">
-                              <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold">
+                              <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold">
                                 {st.attendance_status}
                               </span>
                             </td>
@@ -658,8 +844,10 @@ export const MediaAttendancePage: React.FC = () => {
         </div>
       )}
 
-      {/* Processing History Section */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-4">
+      {/* ========================================================================= */}
+      {/* PROCESSING HISTORY SECTION */}
+      {/* ========================================================================= */}
+      <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-4">
         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
           <div>
             <h3 className="text-base font-bold text-slate-900">Media Processing History</h3>
@@ -667,7 +855,7 @@ export const MediaAttendancePage: React.FC = () => {
           </div>
           <button
             onClick={loadData}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold transition"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition"
           >
             <RefreshCw className="w-3.5 h-3.5 text-slate-500" />
             <span>Refresh</span>
@@ -683,9 +871,9 @@ export const MediaAttendancePage: React.FC = () => {
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto border border-slate-200 rounded-xl">
+          <div className="overflow-x-auto border border-slate-200 rounded-2xl">
             <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 text-slate-500 border-b border-slate-200 font-semibold">
+              <thead className="bg-slate-50 text-slate-500 border-b border-slate-200 font-bold uppercase text-[10px]">
                 <tr>
                   <th className="p-3">Date</th>
                   <th className="p-3">Media Type</th>
@@ -699,16 +887,16 @@ export const MediaAttendancePage: React.FC = () => {
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700">
                 {jobs.map((job) => (
-                  <tr key={job.id} className="hover:bg-slate-50/50">
+                  <tr key={job.id} className="hover:bg-slate-50/70 transition">
                     <td className="p-3 text-[11px] text-slate-500 font-mono">
                       {new Date(job.created_at).toLocaleDateString()} {new Date(job.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </td>
                     <td className="p-3">
                       <span
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold ${
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold ${
                           job.media_type === 'IMAGE'
-                            ? 'bg-blue-50 text-blue-700'
-                            : 'bg-purple-50 text-purple-700'
+                            ? 'bg-blue-50 text-blue-700 border border-blue-100'
+                            : 'bg-purple-50 text-purple-700 border border-purple-100'
                         }`}
                       >
                         {job.media_type === 'IMAGE' ? <FileImage className="w-3 h-3" /> : <FileVideo className="w-3 h-3" />}
@@ -721,14 +909,14 @@ export const MediaAttendancePage: React.FC = () => {
                     </td>
                     <td className="p-3">
                       <span
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
                           job.status === 'COMPLETED'
-                            ? 'bg-emerald-50 text-emerald-700'
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                             : job.status === 'PROCESSING'
-                            ? 'bg-blue-50 text-blue-700 animate-pulse'
+                            ? 'bg-blue-50 text-blue-700 border border-blue-200 animate-pulse'
                             : job.status === 'CANCELLED'
-                            ? 'bg-amber-50 text-amber-700'
-                            : 'bg-rose-50 text-rose-700'
+                            ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                            : 'bg-rose-50 text-rose-700 border border-rose-200'
                         }`}
                       >
                         {job.status}
@@ -740,13 +928,13 @@ export const MediaAttendancePage: React.FC = () => {
                       <div className="flex items-center justify-end gap-1.5">
                         <button
                           onClick={() => setSelectedJobDetails(job)}
-                          className="px-2 py-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-[11px] transition"
+                          className="px-2.5 py-1 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[11px] transition"
                         >
                           View
                         </button>
                         <button
                           onClick={() => handleDeleteJob(job.id)}
-                          className="p-1 text-slate-400 hover:text-rose-600 transition"
+                          className="p-1.5 text-slate-400 hover:text-rose-600 transition"
                           title="Delete job"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -763,8 +951,8 @@ export const MediaAttendancePage: React.FC = () => {
 
       {/* Modal: Job Details View */}
       {selectedJobDetails && (
-        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[85vh] overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[85vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
                 <h3 className="font-bold text-slate-900 text-base flex items-center gap-2">
@@ -783,18 +971,18 @@ export const MediaAttendancePage: React.FC = () => {
             </div>
 
             {/* Metrics */}
-            <div className="grid grid-cols-3 gap-2 bg-slate-50 p-3 rounded-xl border border-slate-100 text-center text-xs">
+            <div className="grid grid-cols-3 gap-2 bg-slate-50 p-3.5 rounded-2xl border border-slate-200/70 text-center text-xs">
               <div>
-                <div className="text-slate-400 text-[10px]">Detected Faces</div>
-                <div className="font-bold text-slate-800 mt-0.5">{selectedJobDetails.faces_detected_total}</div>
+                <div className="text-slate-400 text-[10px] font-bold uppercase">Detected Faces</div>
+                <div className="font-black text-slate-800 text-sm mt-0.5">{selectedJobDetails.faces_detected_total}</div>
               </div>
               <div>
-                <div className="text-slate-400 text-[10px]">Recognized</div>
-                <div className="font-bold text-emerald-600 mt-0.5">{selectedJobDetails.recognized_count}</div>
+                <div className="text-slate-400 text-[10px] font-bold uppercase">Recognized</div>
+                <div className="font-black text-emerald-600 text-sm mt-0.5">{selectedJobDetails.recognized_count}</div>
               </div>
               <div>
-                <div className="text-slate-400 text-[10px]">Attendance Marked</div>
-                <div className="font-bold text-blue-600 mt-0.5">{selectedJobDetails.attendance_marked_count}</div>
+                <div className="text-slate-400 text-[10px] font-bold uppercase">Attendance Marked</div>
+                <div className="font-black text-blue-600 text-sm mt-0.5">{selectedJobDetails.attendance_marked_count}</div>
               </div>
             </div>
 
@@ -802,9 +990,9 @@ export const MediaAttendancePage: React.FC = () => {
             {selectedJobDetails.summary_json?.recognized && selectedJobDetails.summary_json.recognized.length > 0 ? (
               <div className="space-y-2">
                 <h4 className="text-xs font-bold text-slate-800">Verified Students ({selectedJobDetails.summary_json.recognized.length})</h4>
-                <div className="divide-y divide-slate-100 border border-slate-200 rounded-xl overflow-hidden text-xs">
+                <div className="divide-y divide-slate-100 border border-slate-200 rounded-2xl overflow-hidden text-xs">
                   {selectedJobDetails.summary_json.recognized.map((st, idx) => (
-                    <div key={idx} className="p-3 bg-white flex items-center justify-between">
+                    <div key={idx} className="p-3 bg-white flex items-center justify-between hover:bg-slate-50/50">
                       <div>
                         <div className="font-bold text-slate-900">{st.student_name}</div>
                         <div className="text-[11px] text-slate-400">
@@ -813,7 +1001,7 @@ export const MediaAttendancePage: React.FC = () => {
                       </div>
                       <div className="text-right">
                         <span className="font-mono font-bold text-emerald-600 text-xs">{st.confidence_pct}%</span>
-                        <div className="text-[10px] text-slate-400">PRESENT</div>
+                        <div className="text-[10px] text-slate-400 font-bold">PRESENT</div>
                       </div>
                     </div>
                   ))}
@@ -826,7 +1014,7 @@ export const MediaAttendancePage: React.FC = () => {
             <div className="flex justify-end pt-2 border-t border-slate-100">
               <button
                 onClick={() => setSelectedJobDetails(null)}
-                className="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold"
+                className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold"
               >
                 Close
               </button>

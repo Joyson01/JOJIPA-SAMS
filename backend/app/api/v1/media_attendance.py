@@ -1,5 +1,7 @@
 import asyncio
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
+import cv2
+import numpy as np
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,6 +11,7 @@ from backend.app.schemas.media_attendance import (
     MediaJobResponse,
 )
 from backend.app.services.attendance_service import SessionNotFoundError
+from backend.app.services.recognition_service import RecognitionService, get_pipeline
 from backend.app.services.media_attendance_service import (
     MediaAttendanceService,
     MAX_IMAGE_SIZE_BYTES,
@@ -16,6 +19,54 @@ from backend.app.services.media_attendance_service import (
 )
 
 router = APIRouter(prefix="/media-attendance", tags=["Media Attendance"])
+
+
+@router.post(
+    "/analyze-image",
+    summary="Diagnostic Face Detection & Recognition on Image",
+    description="Development diagnostic endpoint returning structured face bounding boxes, confidences, and identity matches without modifying session attendance.",
+)
+async def diagnose_image(
+    file: UploadFile = File(..., description="Image JPEG/PNG/WEBP"),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    image_bytes = await file.read()
+    if len(image_bytes) == 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded image is empty.")
+
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if image is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Failed to decode image bytes.")
+
+    pipeline = get_pipeline()
+    if pipeline.matcher.total_templates == 0:
+        await RecognitionService.sync_gallery_from_db(db)
+
+    results, face_boxes = pipeline.process_frame(image)
+    faces_data = []
+    for idx, r in enumerate(results):
+        box = face_boxes[idx].bbox.to_list()[:4] if idx < len(face_boxes) else []
+        conf = round(float(getattr(face_boxes[idx], 'det_score', 1.0)), 4) if idx < len(face_boxes) else 1.0
+        identity_name = r.best_match.name if (r.decision.value == "KNOWN" and r.best_match) else "Unknown"
+        identity_conf = round(r.best_match.similarity, 4) if r.best_match else 0.0
+        faces_data.append({
+            "face_index": idx + 1,
+            "box": box,
+            "confidence": conf,
+            "identity": identity_name,
+            "identity_confidence": identity_conf,
+            "state": r.decision.value,
+            "rejection_reason": r.rejection_reason,
+        })
+
+    return {
+        "faces_detected": len(results),
+        "faces": faces_data,
+        "recognized_count": sum(1 for f in faces_data if f["state"] == "KNOWN"),
+        "unknown_count": sum(1 for f in faces_data if f["state"] == "UNKNOWN"),
+        "uncertain_count": sum(1 for f in faces_data if f["state"] == "UNCERTAIN"),
+    }
 
 
 @router.post(
@@ -29,11 +80,14 @@ async def analyze_image_attendance(
     file: UploadFile = File(..., description="Classroom photo JPEG/PNG/WEBP"),
     db: AsyncSession = Depends(get_db),
 ) -> MediaAnalysisResponse:
-    allowed_types = {"image/jpeg", "image/png", "image/webp"}
-    if file.content_type not in allowed_types:
+    valid_exts = {".jpg", ".jpeg", ".png", ".webp"}
+    file_ext = "." + (file.filename or "").split(".")[-1].lower() if "." in (file.filename or "") else ""
+    allowed_types = {"image/jpeg", "image/jpg", "image/png", "image/webp", "image/pjpeg", "application/octet-stream"}
+
+    if file.content_type not in allowed_types and file_ext not in valid_exts:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail=f"Unsupported image format '{file.content_type}'. Please upload JPEG, PNG, or WEBP.",
+            detail=f"Unsupported image format. Please upload JPEG, PNG, or WEBP.",
         )
 
     image_bytes = await file.read()

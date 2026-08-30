@@ -14,10 +14,7 @@ export const analyzeImageAttendance = async (
 
   const response = await apiClient.post<MediaAnalysisResponse>(
     '/media-attendance/image',
-    formData,
-    {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    }
+    formData
   );
   return response.data;
 };
@@ -34,10 +31,7 @@ export const processVideoAttendance = async (
 
   const response = await apiClient.post<MediaJobResponse>(
     '/media-attendance/video',
-    formData,
-    {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    }
+    formData
   );
   return response.data;
 };

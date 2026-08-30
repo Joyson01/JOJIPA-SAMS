@@ -114,8 +114,10 @@ class MediaAttendanceService:
                                 student_id=st_id,
                                 confidence=r.best_match.similarity,
                                 liveness_score=1.0,
+                                source="MEDIA_IMAGE",
                                 remarks=f"Media Image: {filename} ({r.best_match.confidence_pct:.1f}%)",
                             ),
+                            allow_non_active=True,
                         )
                         marked_student_ids.add(st_id)
                     except Exception as e:
@@ -285,14 +287,20 @@ class MediaAttendanceService:
         cls,
         job_id: str,
         sample_fps: float = 3.0,
+        session_factory: Optional[Any] = None,
     ) -> None:
         """Background worker task that extracts frames, tracks faces, runs recognition, and marks attendance."""
         from backend.app.database.session import AsyncSessionLocal
 
+        def _get_db():
+            if session_factory is not None:
+                return session_factory()
+            return AsyncSessionLocal()
+
         cancel_event = asyncio.Event()
         _active_cancellation_events[job_id] = cancel_event
 
-        async with AsyncSessionLocal() as db:
+        async with _get_db() as db:
             job_res = await db.execute(
                 select(MediaProcessingJob).where(MediaProcessingJob.id == job_id)
             )
@@ -311,7 +319,7 @@ class MediaAttendanceService:
         # Video frame analysis loop
         cap = cv2.VideoCapture(file_path)
         if not cap.isOpened():
-            async with AsyncSessionLocal() as db:
+            async with _get_db() as db:
                 j = await db.get(MediaProcessingJob, job_id)
                 if j:
                     j.status = "FAILED"
@@ -326,7 +334,7 @@ class MediaAttendanceService:
         frame_interval = max(1, int(round(orig_fps / sample_fps)))
 
         pipeline = get_pipeline()
-        async with AsyncSessionLocal() as db:
+        async with _get_db() as db:
             if pipeline.matcher.total_templates == 0:
                 await RecognitionService.sync_gallery_from_db(db)
 
@@ -400,7 +408,7 @@ class MediaAttendanceService:
                     # Periodic DB progress update every 15 sampled frames
                     if frames_processed_count % 15 == 0:
                         progress = round((frame_idx / max(1, total_frames)) * 100.0, 1)
-                        async with AsyncSessionLocal() as db:
+                        async with _get_db() as db:
                             j = await db.get(MediaProcessingJob, job_id)
                             if j and j.status == "PROCESSING":
                                 j.progress_pct = progress
@@ -416,7 +424,7 @@ class MediaAttendanceService:
 
         except Exception as proc_err:
             logger.error(f"Error during video processing job {job_id}: {proc_err}", exc_info=True)
-            async with AsyncSessionLocal() as db:
+            async with _get_db() as db:
                 j = await db.get(MediaProcessingJob, job_id)
                 if j:
                     j.status = "FAILED"
@@ -431,7 +439,7 @@ class MediaAttendanceService:
 
         # Handle Cancellation
         if cancel_event.is_set():
-            async with AsyncSessionLocal() as db:
+            async with _get_db() as db:
                 j = await db.get(MediaProcessingJob, job_id)
                 if j:
                     j.status = "CANCELLED"
@@ -444,7 +452,7 @@ class MediaAttendanceService:
         recognized_items: List[MediaAttendanceItem] = []
         marked_count = 0
 
-        async with AsyncSessionLocal() as db:
+        async with _get_db() as db:
             for s_id, obs in student_observations.items():
                 st_ent = student_lookup.get(s_id)
                 st_name = st_ent.full_name if st_ent else obs["name"]
@@ -464,8 +472,10 @@ class MediaAttendanceService:
                             student_id=s_id,
                             confidence=obs["max_conf"],
                             liveness_score=1.0,
+                            source="MEDIA_VIDEO",
                             remarks=f"Media Video: {time_range_str} ({obs['count']} observations, {obs['max_conf_pct']:.1f}%)",
                         ),
+                        allow_non_active=True,
                     )
                     marked_count += 1
                 except Exception as e:

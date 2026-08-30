@@ -295,6 +295,7 @@ class AttendanceService:
         db: AsyncSession,
         session_id: str,
         payload: AttendanceMarkPayload,
+        allow_non_active: bool = False,
     ) -> AttendanceRecordResponse:
         """Marks attendance ONCE per student+session with strict 3-level duplicate protection and presence tracking."""
         from sqlalchemy.exc import IntegrityError
@@ -304,7 +305,7 @@ class AttendanceService:
         if not session:
             raise SessionNotFoundError(session_id)
 
-        if session.status != "ACTIVE":
+        if not allow_non_active and session.status != "ACTIVE":
             raise SessionNotActiveError(session_id, session.status)
 
         student = await db.get(Student, payload.student_id)
