@@ -224,6 +224,23 @@ class Camera(Base):
     # Relationships
     attendance_records = relationship("AttendanceRecord", back_populates="camera")
     recognition_events = relationship("RecognitionEvent", back_populates="camera")
+    pairing_sessions = relationship("MobilePairingSession", back_populates="camera", cascade="all, delete-orphan")
+
+
+class MobilePairingSession(Base):
+    __tablename__ = "mobile_pairing_sessions"
+
+    id: Mapped[str] = mapped_column(GUID, primary_key=True, default=generate_uuid)
+    camera_id: Mapped[str] = mapped_column(GUID, ForeignKey("cameras.id", ondelete="CASCADE"), index=True, nullable=False)
+    token: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="PENDING", index=True, nullable=False)  # PENDING, CONNECTED, EXPIRED, REVOKED, DISCONNECTED
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    connected_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    disconnected_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Relationships
+    camera = relationship("Camera", back_populates="pairing_sessions")
 
 
 class RecognitionEvent(Base):

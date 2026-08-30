@@ -1,17 +1,27 @@
+import asyncio
+from pathlib import Path
 from typing import List, Optional
-from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile, status
-from sqlalchemy.ext.asyncio import AsyncSession
+import cv2
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
+from fastapi.responses import StreamingResponse
+import numpy as np
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.database.session import get_db
 from backend.app.models.entities import Camera
+from backend.app.schemas.attendance import AttendanceMarkPayload
 from backend.app.schemas.camera import (
     CameraCreate,
     CameraResponse,
     CameraTestResult,
     CameraUpdate,
+    MobilePairingResponse,
+    ONVIFDiscoveryResponse,
 )
+from backend.app.services.attendance_service import AttendanceService
 from backend.app.services.camera_service import CameraNotFoundError, CameraService
+from backend.app.services.recognition_service import RecognitionService, get_pipeline
 
 router = APIRouter(prefix="/cameras", tags=["Camera Management"])
 
@@ -21,7 +31,7 @@ router = APIRouter(prefix="/cameras", tags=["Camera Management"])
     response_model=CameraResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Register Camera",
-    description="Registers a new camera device or RTSP endpoint.",
+    description="Registers a new camera device (Hardware Webcam, Mobile, CCTV / RTSP, or Video File).",
 )
 async def create_camera(
     camera_in: CameraCreate,
@@ -43,6 +53,46 @@ async def list_cameras(
     db: AsyncSession = Depends(get_db),
 ) -> List[CameraResponse]:
     return await CameraService.list_cameras(db, location=location, is_active=is_active, assigned_class=assigned_class)
+
+
+@router.get(
+    "/discover-onvif",
+    response_model=ONVIFDiscoveryResponse,
+    summary="Discover ONVIF IP Cameras",
+    description="Probes the local area network subnet for discoverable ONVIF IP cameras using WS-Discovery.",
+)
+async def discover_onvif(
+    timeout: float = Query(1.5, ge=0.5, le=5.0, description="Probe timeout in seconds"),
+) -> ONVIFDiscoveryResponse:
+    return CameraService.discover_onvif_cameras(timeout_sec=timeout)
+
+
+@router.get(
+    "/pairing-session/{token}",
+    summary="Validate Mobile Pairing Session",
+    description="Verifies a mobile QR pairing token and returns camera metadata for the smartphone capture station.",
+)
+async def get_pairing_session(
+    token: str,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await CameraService.validate_pairing_session(db, token)
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Pairing session is invalid, expired, or was revoked by administrator.",
+        )
+    camera, session = result
+    return {
+        "valid": True,
+        "camera_id": camera.id,
+        "camera_name": camera.name,
+        "location": camera.location,
+        "assigned_class": camera.assigned_class,
+        "target_fps": camera.target_fps,
+        "resolution": camera.resolution,
+        "session_status": session.status,
+    }
 
 
 @router.get(
@@ -101,7 +151,7 @@ async def test_registered_camera(
     "/test-connection",
     response_model=CameraTestResult,
     summary="Test Camera Connectivity",
-    description="Performs an immediate real camera handshake test and returns measured latency, FPS, and resolution.",
+    description="Performs an immediate real camera handshake test and returns measured latency, FPS, resolution, and detector validation.",
 )
 async def test_connection(
     stream_url: Optional[str] = Body(None, embed=True),
@@ -138,6 +188,7 @@ async def stop_camera_worker(camera_id: str):
 
 @router.post(
     "/mobile-pairing",
+    response_model=MobilePairingResponse,
     summary="Generate Mobile Camera Pairing Token",
     description="Generates a temporary secure pairing session for smartphone camera streaming without creating duplicate camera records.",
 )
@@ -147,72 +198,102 @@ async def create_mobile_pairing(
     location: str = Query("Classroom", description="Location where the phone is deployed"),
     assigned_class: Optional[str] = Query(None, description="Class code"),
     db: AsyncSession = Depends(get_db),
+) -> MobilePairingResponse:
+    return await CameraService.create_or_renew_mobile_pairing(
+        db=db,
+        camera_id=camera_id,
+        camera_name=camera_name,
+        location=location,
+        assigned_class=assigned_class,
+    )
+
+
+@router.post(
+    "/{camera_id}/revoke-pairing",
+    summary="Revoke Mobile Pairing",
+    description="Revokes all active pairing sessions for the camera and resets status to OFFLINE.",
+)
+async def revoke_mobile_pairing(
+    camera_id: str,
+    db: AsyncSession = Depends(get_db),
 ):
-    import secrets
-    token = secrets.token_urlsafe(16)
+    await CameraService.revoke_pairing(db, camera_id)
+    return {"status": "revoked", "camera_id": camera_id}
 
-    # If existing camera_id provided, re-pair that exact camera
-    if camera_id:
-        existing_cam = await db.get(Camera, camera_id)
-        if existing_cam:
-            existing_cam.stream_url = f"mobile://{token}"
-            existing_cam.status = "CONNECTED"
-            if assigned_class:
-                existing_cam.assigned_class = assigned_class
-            await db.commit()
-            await db.refresh(existing_cam)
-            return {
-                "token": token,
-                "camera_id": existing_cam.id,
-                "camera_name": existing_cam.name,
-                "location": existing_cam.location,
-                "source_type": existing_cam.source_type,
-            }
 
-    # Check if a mobile camera already exists with the same name and location
-    query = select(Camera).where(
-        Camera.source_type == "MOBILE",
-        Camera.name == camera_name,
-        Camera.location == location,
+@router.get(
+    "/{camera_id}/preview",
+    summary="Get Camera Latest Frame Snapshot",
+    description="Returns the latest decoded image frame as a JPEG buffer for web preview.",
+)
+async def get_camera_preview(
+    camera_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    frame = CameraService.get_cached_frame(camera_id)
+    if frame is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No live video frame currently available for this camera.",
+        )
+    ret, jpeg = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+    if not ret:
+        raise HTTPException(status_code=500, detail="Failed to encode JPEG preview.")
+    return Response(content=jpeg.tobytes(), media_type="image/jpeg")
+
+
+@router.get(
+    "/{camera_id}/mjpeg",
+    summary="Get Live MJPEG Video Stream",
+    description="Streams real-time multipart/x-mixed-replace JPEG frames for live browser CCTV/RTSP viewing.",
+)
+async def get_camera_mjpeg_stream(
+    camera_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    async def mjpeg_generator():
+        while True:
+            frame = CameraService.get_cached_frame(camera_id)
+            if frame is not None:
+                ret, jpeg = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 75])
+                if ret:
+                    yield (
+                        b"--frame\r\n"
+                        b"Content-Type: image/jpeg\r\n\r\n" + jpeg.tobytes() + b"\r\n"
+                    )
+            await asyncio.sleep(0.066)  # ~15 FPS
+
+    return StreamingResponse(
+        mjpeg_generator(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
     )
-    res = await db.execute(query)
-    found_cam = res.scalars().first()
 
-    if found_cam:
-        found_cam.stream_url = f"mobile://{token}"
-        found_cam.status = "CONNECTED"
-        if assigned_class:
-            found_cam.assigned_class = assigned_class
-        await db.commit()
-        await db.refresh(found_cam)
-        return {
-            "token": token,
-            "camera_id": found_cam.id,
-            "camera_name": found_cam.name,
-            "location": found_cam.location,
-            "source_type": found_cam.source_type,
-        }
 
-    # Otherwise create a new single mobile camera record
-    cam = await CameraService.create_camera(
-        db,
-        CameraCreate(
-            name=camera_name,
-            location=location,
-            source_type="MOBILE",
-            stream_url=f"mobile://{token}",
-            target_fps=15,
-            resolution="1280x720",
-            assigned_class=assigned_class,
-            is_active=True,
-        ),
-    )
+@router.post(
+    "/upload-video",
+    summary="Upload Video File for Test Camera",
+    description="Uploads a local MP4/AVI video file to use as a simulated CCTV camera source for offline recognition debugging.",
+)
+async def upload_test_video(
+    file: UploadFile = File(...),
+):
+    allowed_exts = {".mp4", ".avi", ".mkv", ".mov", ".webm"}
+    ext = Path(file.filename or "video.mp4").suffix.lower()
+    if ext not in allowed_exts:
+        raise HTTPException(status_code=400, detail=f"Unsupported video format. Allowed: {sorted(allowed_exts)}")
+
+    upload_dir = Path("data/uploads/videos")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    target_path = upload_dir / f"test_feed_{Path(file.filename or 'video.mp4').name}"
+
+    contents = await file.read()
+    target_path.write_bytes(contents)
+
     return {
-        "token": token,
-        "camera_id": cam.id,
-        "camera_name": cam.name,
-        "location": cam.location,
-        "source_type": cam.source_type,
+        "success": True,
+        "filename": target_path.name,
+        "file_path": str(target_path),
+        "source_type": "VIDEO_FILE",
     }
 
 
@@ -228,12 +309,6 @@ async def process_mobile_frame(
     file: UploadFile = File(..., description="JPEG frame buffer"),
     db: AsyncSession = Depends(get_db),
 ):
-    import cv2
-    import numpy as np
-    from backend.app.services.recognition_service import get_pipeline, RecognitionService
-    from backend.app.services.attendance_service import AttendanceService
-    from backend.app.schemas.attendance import AttendanceMarkPayload
-
     if file is None:
         raise HTTPException(status_code=400, detail="No video frame payload uploaded.")
 
@@ -244,8 +319,8 @@ async def process_mobile_frame(
     if image is None:
         raise HTTPException(status_code=400, detail="Failed to decode mobile camera frame buffer.")
 
-    # Record real frame activity for camera health tracking
-    await CameraService.record_frame_received(db, camera_id)
+    # Record real frame activity and cache latest frame for preview
+    await CameraService.record_frame_received(db, camera_id, frame=image)
 
     pipeline = get_pipeline()
     if pipeline.matcher.total_templates == 0:
@@ -293,3 +368,4 @@ async def process_mobile_frame(
         ],
         "attendance_marked": attendance_events,
     }
+

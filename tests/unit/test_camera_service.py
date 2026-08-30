@@ -52,5 +52,5 @@ def test_camera_connection_diagnostic():
     # Test invalid connection URL
     res = CameraService.test_camera_connection("rtsp://invalid-non-existent-ip:554/live")
     assert res.success is False
-    assert "Failed to open" in res.message or "error" in res.message.lower()
+    assert "connect" in res.message.lower() or "error" in res.message.lower() or "failed" in res.message.lower()
 

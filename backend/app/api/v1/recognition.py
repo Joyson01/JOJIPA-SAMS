@@ -37,6 +37,10 @@ async def process_recognition_image(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty.")
 
     try:
+        if camera_id:
+            from backend.app.services.camera_service import CameraService
+            await CameraService.record_frame_received(db, camera_id)
+
         rec_res = await RecognitionService.process_image_bytes(
             db=db,
             image_bytes=image_bytes,

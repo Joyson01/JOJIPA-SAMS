@@ -69,6 +69,34 @@ class CameraTestResult(BaseModel):
     connection: bool = False
     stream: bool = False
     frames: bool = False
+    detector: bool = False
     resolution: Optional[str] = None
     fps: float = 0.0
     latency_ms: float = 0.0
+
+
+class MobilePairingResponse(BaseModel):
+    token: str
+    camera_id: str
+    camera_name: str
+    location: str
+    source_type: str
+    pairing_url: str
+    expires_at: datetime
+    status: str
+
+
+class ONVIFDiscoveredCamera(BaseModel):
+    name: str
+    ip: str
+    port: int = 80
+    manufacturer: Optional[str] = None
+    model: Optional[str] = None
+    rtsp_url_hint: str
+    is_reachable: bool = True
+
+
+class ONVIFDiscoveryResponse(BaseModel):
+    cameras: List[ONVIFDiscoveredCamera] = []
+    scanned_subnet: str
+    total_found: int = 0

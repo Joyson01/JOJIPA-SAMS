@@ -40,7 +40,35 @@ export interface CameraTestResult {
   connection: boolean;
   stream: boolean;
   frames: boolean;
+  detector?: boolean;
   resolution?: string | null;
   fps: number;
   latency_ms: number;
+}
+
+export interface ONVIFDiscoveredCamera {
+  name: string;
+  ip: string;
+  port: number;
+  manufacturer?: string | null;
+  model?: string | null;
+  rtsp_url_hint: string;
+  is_reachable: boolean;
+}
+
+export interface ONVIFDiscoveryResponse {
+  cameras: ONVIFDiscoveredCamera[];
+  scanned_subnet: string;
+  total_found: number;
+}
+
+export interface MobilePairingResponse {
+  token: string;
+  camera_id: string;
+  camera_name: string;
+  location: string;
+  source_type: string;
+  pairing_url: string;
+  expires_at: string;
+  status: string;
 }

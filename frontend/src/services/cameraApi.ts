@@ -45,3 +45,24 @@ export const startCameraWorker = async (cameraId: string): Promise<void> => {
 export const stopCameraWorker = async (cameraId: string): Promise<void> => {
   await apiClient.post(`/cameras/${cameraId}/stop`);
 };
+
+export const discoverONVIFCameras = async (timeoutSec = 1.5): Promise<any> => {
+  const response = await apiClient.get('/cameras/discover-onvif', {
+    params: { timeout: timeoutSec },
+  });
+  return response.data;
+};
+
+export const uploadVideoFile = async (file: File): Promise<{ success: boolean; file_path: string; filename: string }> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  const response = await apiClient.post('/cameras/upload-video', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return response.data;
+};
+
+export const revokeMobilePairing = async (cameraId: string): Promise<void> => {
+  await apiClient.post(`/cameras/${cameraId}/revoke-pairing`);
+};
+

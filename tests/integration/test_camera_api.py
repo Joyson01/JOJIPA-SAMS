@@ -39,7 +39,23 @@ async def test_camera_api_endpoints(client):
     assert test_resp.status_code == 200
     assert "success" in test_resp.json()
 
-    # 6. Delete Camera
+    # 6. Test Mobile Pairing Flow
+    pairing_resp = await client.post("/api/v1/cameras/mobile-pairing", params={"camera_id": camera_id})
+    assert pairing_resp.status_code == 200
+    token = pairing_resp.json()["token"]
+
+    # 7. Validate Pairing Session
+    val_resp = await client.get(f"/api/v1/cameras/pairing-session/{token}")
+    assert val_resp.status_code == 200
+    assert val_resp.json()["valid"] is True
+
+    # 8. Discover ONVIF
+    onvif_resp = await client.get("/api/v1/cameras/discover-onvif?timeout=0.5")
+    assert onvif_resp.status_code == 200
+    assert "cameras" in onvif_resp.json()
+
+    # 9. Delete Camera
     del_resp = await client.delete(f"/api/v1/cameras/{camera_id}")
     assert del_resp.status_code == 204
+
 
