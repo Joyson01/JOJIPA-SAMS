@@ -1,4 +1,5 @@
 # JOJIPA-SAMS — System Architecture
+
 ## Smart Attendance Management System
 
 **Document Version:** 1.0.0  

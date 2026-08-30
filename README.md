@@ -89,6 +89,15 @@ JOJIPA-SAMS provides an end-to-end intelligent visual attendance platform:
 ```
 JOJIPA-SAMS/
 │
+├── start.sh                 # Root One-Click Full-Stack Launcher
+├── start.bat                # Windows Full-Stack Launcher
+├── scripts/
+│   ├── setup.sh             # One-time environment & dependency setup
+│   ├── start.sh             # Background service orchestration & health checks
+│   ├── stop.sh              # Clean graceful service shutdown
+│   ├── status.sh            # Live component health diagnostic
+│   └── seed_demo.py         # Optional manual database seeder
+│
 ├── backend/
 │   ├── app/
 │   │   ├── api/v1/          # REST route controllers
@@ -118,9 +127,8 @@ JOJIPA-SAMS/
 │   ├── public/              # Static assets
 │   └── package.json         # Frontend dependencies & build scripts
 │
-├── scripts/
-│   └── seed_demo.py         # Optional manual database seeder
 ├── tests/
+│   ├── fixtures/            # Test fixture assets
 │   ├── unit/                # 28 isolated mathematical & service unit tests
 │   └── integration/         # 10 comprehensive REST API integration tests
 ├── .env.example             # Documented environment template
@@ -129,19 +137,44 @@ JOJIPA-SAMS/
 └── PROJECT_REPORT.md        # 46-section technical engineering report
 ```
 
-## 9. Installation
+## 9. Quick Start (One-Click Launch)
+
+### Step 1: Clone and Run Initial Setup
 ```bash
-# 1. Clone Repository
 git clone https://github.com/Joyson01/SAMS.git
 cd SAMS
 
-# 2. Setup Python Virtual Environment
+# Run automated one-time dependency and environment configuration
+./scripts/setup.sh
+```
+
+### Step 2: Start Full Stack
+```bash
+# Starts Database, Backend API, and Frontend Dev Server with live health verification
+./start.sh
+```
+
+### Utility Commands
+```bash
+# Check service health & diagnostics
+./scripts/status.sh
+
+# Stop all services cleanly
+./scripts/stop.sh
+```
+
+---
+
+## 10. Manual Installation & Custom Setup
+If you prefer configuring services step-by-step manually:
+```bash
+# 1. Setup Python Virtual Environment
 python3 -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install --upgrade pip
 pip install -r requirements.txt
 
-# 3. Setup Frontend Dependencies
+# 2. Setup Frontend Dependencies
 cd frontend
 corepack enable
 pnpm install

@@ -21,20 +21,20 @@
 
 ## 2. Inventory of Removed / Cleaned Assets
 
-| File / Folder | Category | Reason for Deletion / Relocation |
-|---|---|---|
-| `./capture_face.py` | Legacy Prototype | Replaced by production modular `backend/app/api/v1/students.py` and `ai_engine/pipeline/`. |
-| `./live_verify.py` | Legacy Prototype | Replaced by `backend/app/services/attendance_service.py` and `LiveDashboardPage.tsx`. |
-| `./src/attendance_db.py` | Obsolete Prototype | Replaced by asynchronous SQLAlchemy 2.0 ORM models in `backend/app/models/entities.py`. |
-| `./src/build_embeddings.py`| Obsolete Script | Replaced by `ai_engine/recognition/arcface.py` and relational `FaceProfile` vector storage. |
-| `./src/live_verify.py` | Obsolete Script | Duplicate of root prototype script; replaced by production AI engine. |
-| `./src/server.py` | Obsolete Prototype | Standalone Flask-style script replaced by modern modular FastAPI backend (`backend/app/main.py`). |
-| `./src/single_image.py` | Obsolete Prototype | Single-image script replaced by `/api/v1/recognition/detect` and unit tests. |
-| `./src/webcam.py` | Obsolete Prototype | Replaced by browser Web Media API in React and `ai_engine/streaming/rtsp_worker.py`. |
-| `./src/Test/` | Test Fixtures | Relocated to standard `tests/fixtures/` (`pankaj.jpg`, `test_grp.jpg`, `test_class.jpg`). |
-| `./data/attendance.db` | Stale Database | Old SQLite prototype database; replaced by `data/sams_dev.db` and PostgreSQL migrations. |
-| `./data/students/` | Stale Media | Old manual photo dumps from early experiments; replaced by clean database enrollments. |
-| `./embeddings/` | Stale Storage | Raw `.npy` file dumps replaced by normalized vector columns in relational database. |
+| File / Folder               | Category           | Reason for Deletion / Relocation                                                                  |
+| --------------------------- | ------------------ | ------------------------------------------------------------------------------------------------- |
+| `./capture_face.py`         | Legacy Prototype   | Replaced by production modular `backend/app/api/v1/students.py` and `ai_engine/pipeline/`.        |
+| `./live_verify.py`          | Legacy Prototype   | Replaced by `backend/app/services/attendance_service.py` and `LiveDashboardPage.tsx`.             |
+| `./src/attendance_db.py`    | Obsolete Prototype | Replaced by asynchronous SQLAlchemy 2.0 ORM models in `backend/app/models/entities.py`.           |
+| `./src/build_embeddings.py` | Obsolete Script    | Replaced by `ai_engine/recognition/arcface.py` and relational `FaceProfile` vector storage.       |
+| `./src/live_verify.py`      | Obsolete Script    | Duplicate of root prototype script; replaced by production AI engine.                             |
+| `./src/server.py`           | Obsolete Prototype | Standalone Flask-style script replaced by modern modular FastAPI backend (`backend/app/main.py`). |
+| `./src/single_image.py`     | Obsolete Prototype | Single-image script replaced by `/api/v1/recognition/detect` and unit tests.                      |
+| `./src/webcam.py`           | Obsolete Prototype | Replaced by browser Web Media API in React and `ai_engine/streaming/rtsp_worker.py`.              |
+| `./src/Test/`               | Test Fixtures      | Relocated to standard `tests/fixtures/` (`pankaj.jpg`, `test_grp.jpg`, `test_class.jpg`).         |
+| `./data/attendance.db`      | Stale Database     | Old SQLite prototype database; replaced by `data/sams_dev.db` and PostgreSQL migrations.          |
+| `./data/students/`          | Stale Media        | Old manual photo dumps from early experiments; replaced by clean database enrollments.            |
+| `./embeddings/`             | Stale Storage      | Raw `.npy` file dumps replaced by normalized vector columns in relational database.               |
 
 ---
 

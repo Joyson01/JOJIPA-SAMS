@@ -34,8 +34,10 @@ data/*.db
 data/*.sqlite3
 data/students/*
 uploads/*
-logs/*.log
+logs/
 *.log
+.run/
+*.pid
 
 # Node & Frontend Build Artifacts
 node_modules/
