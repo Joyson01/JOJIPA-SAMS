@@ -1,417 +1,584 @@
-# JOJIPA-SAMS — Smart Attendance Management System
+# JOJIPA-SAMS
+## Smart Attendance Management System — Technical Project Report
 
-## Comprehensive Engineering Project Report & Architecture Specification
+**Document Version:** 1.0.0  
+**Project Authority:** Department of Computer Engineering  
+**System Name:** JOJIPA-SAMS (Smart Attendance Management System)  
+**Target Class:** TE-B (Effective From: 15/06/2026)  
+**Date of Report:** August 31, 2026  
 
 ---
 
-## 1. Project Overview
+## Executive Summary & Technology Matrix
 
-The **JOJIPA-SAMS (Smart Attendance Management System)** is an automated, AI-powered Face Attendance Management System engineered for educational institutions, colleges, and universities. By integrating deep learning vision models with an asynchronous service architecture, JOJIPA-SAMS automates classroom attendance, eliminates manual roll-call overhead, prevents proxy attendance (buddy punching), and provides continuous student presence tracking.
+| Layer | Technology | Purpose | Actual Usage & Implementation |
+| :--- | :--- | :--- | :--- |
+| **Frontend Framework** | React 18.3.1 + TypeScript 5.6.3 | Interactive Single Page Application (SPA) | `frontend/src/App.tsx` |
+| **Frontend Build Tool** | Vite 5.4.8 + `@vitejs/plugin-basic-ssl` | Fast HMR dev server & HTTPS tunnel for camera permissions | `frontend/vite.config.ts` |
+| **CSS Framework** | Tailwind CSS 3.4.13 + Lucide React 0.453.0 | Modern responsive utility layout and icon kit | `frontend/src/index.css` |
+| **Backend Framework** | FastAPI 0.115.0+ (ASGI) + Uvicorn 0.30.0+ | High-throughput asynchronous REST & WebSocket API | `backend/app/main.py` |
+| **Database Engine** | SQLite 3 (Dev/Local) / PostgreSQL 16+ (Prod) | Relational persistence with JSON & UUID types | `backend/app/database/session.py` |
+| **ORM / Data Access** | SQLAlchemy 2.0.30+ (AsyncIO) + Alembic 1.13.0+ | Async ORM, declarative entities, schema migrations | `backend/app/models/entities.py` |
+| **Face Detection** | SCRFD-10G (InsightFace `buffalo_l`) | Multi-face detection with 5 fiducial landmarks | `ai_engine/detection/scrfd.py` |
+| **Face Recognition** | ArcFace (ResNet-50 / `w600k_r50.onnx`) | 512-dimensional $L_2$-normalized embedding extraction | `ai_engine/recognition/arcface.py` |
+| **Vector Matching** | VectorMatcher (BLAS Matrix Dot Product) | Cosine similarity comparison with 3-state decision logic | `ai_engine/recognition/vector_matcher.py` |
+| **Face Tracking** | ByteTrack + KalmanBoxTracker | Multi-object tracking across sequential video frames | `ai_engine/tracking/byte_tracker.py` |
+| **Temporal Verification**| Sliding-Window Consensus Accumulator | Multi-frame consensus voting and track stabilization | `ai_engine/verification/temporal_verifier.py` |
+| **Liveness / Anti-Spoof**| Frequency & Texture Gradient Analysis | Texture analysis and inter-ocular geometry checks | `ai_engine/liveness/liveness_detector.py` |
+| **Image Processing** | OpenCV 4.10.0+ (C++ bindings) + NumPy 1.26.0+ | Frame decoding, affine warping, color conversion | `ai_engine/alignment/face_aligner.py` |
+| **Camera Protocols** | HTML5 MediaDevices, WebSocket MJPEG, RTSP/TCP | Webcams, Mobile phone pairing, IP CCTV feeds | `backend/app/services/camera_service.py` |
+| **Testing Suite** | Pytest 8.2.0+ & Pytest-AsyncIO 0.23.0+ | Asynchronous unit, integration, and E2E testing (100 Tests) | `tests/` |
 
-## 2. Problem Statement
+---
 
-Academic institutions face persistent operational inefficiencies in attendance administration:
+## 1. Abstract
 
-1. **Instructional Time Wastage:** In typical classrooms of 40–120 students, manual paper roll-calling consumes 10–20% of every lecture hour.
-2. **Proxy Marking & Attendance Fraud:** Sign-in sheets and RFID smartcards are frequently shared among peers, compromising institutional record integrity.
-3. **Delayed Absenteeism Intervention:** Manual records are compiled weeks late, preventing timely academic counselling for at-risk students.
-4. **Biometric Hardware Rigidity:** Wall-mounted fingerprint and single-user face scanners cause severe congestion at classroom doors and cannot monitor continuous student presence during lectures.
+**JOJIPA-SAMS (Smart Attendance Management System)** is an automated, edge-capable biometric attendance platform engineered for collegiate and institutional classroom environments. Traditional roll-call and manual swipe-card mechanisms suffer from substantial instruction time loss (5–10 minutes per lecture), susceptibility to proxy attendance, and a lack of continuous in-lecture presence auditing. 
 
-## 3. Motivation
+JOJIPA-SAMS addresses these shortcomings by integrating state-of-the-art computer vision models—including **SCRFD-10G** for face detection, **ArcFace ResNet-50** for 512-dimensional face recognition embeddings, **ByteTrack Kalman tracking** for temporal track persistence, and a **Sliding-Window Temporal Verifier**—to deliver automated, sub-second attendance marking. The system supports diverse visual capture modalities: local USB/hardware webcams, secure QR-paired mobile phones acting as mobile capture stations, IP CCTV RTSP streams, and pre-recorded classroom media (high-resolution group photos and video recordings). 
 
-Higher education requires an unintrusive, real-time, multi-person visual attendance system that functions using standard classroom hardware (webcams, smartphone cameras, or RTSP security cameras) without requiring students to queue individually at a terminal.
+Built on an asynchronous Python (FastAPI/SQLAlchemy) backend and a React/TypeScript frontend, JOJIPA-SAMS enforces strict **3-Level Duplicate Protection** (`UNIQUE(session_id, student_id)`), real-time presence auditing (`VISIBLE`, `TEMPORARILY_NOT_VISIBLE`, `RETURNED`), official weekly timetable scheduling with batch-level partitioning (e.g. TE-B Batches B1 and B2), and detailed academic attendance reporting.
 
-## 4. Objectives
+---
 
-- **Sub-Second Multi-Face Inference:** Process up to 10 simultaneous classroom faces with inference latencies under 50ms on standard x86 CPU hardware.
-- **Anti-Spoofing & Liveness Integrity:** Reject digital screen replays, printed photographs, and warped static masks using passive frequency-domain texture analysis.
-- **Strict Single-Attendance Guarantee:** Guarantee that no student receives duplicate attendance records for the same session regardless of continuous camera visibility.
-- **Zero-Friction Smartphone Pairing:** Allow instructors to transform any smartphone into a classroom attendance scanner in under 5 seconds via QR code pairing.
-- **Auditability & Manual Override:** Provide faculty with manual override tools (including medical/excused leave recording) backed by immutable audit log trails.
+## 2. Introduction & Problem Statement
 
-## 5. Proposed Solution
+### 2.1 Background
+Classroom management in higher education requires accurate attendance accounting for academic compliance, continuous internal assessment, and regulatory auditing. In standard university setups with 60–80 students per division, manual attendance logging presents critical operational friction:
+1. **Instructional Time Degradation:** Calling roll-call or passing physical sign-in sheets consumes 10% to 15% of scheduled lecture time.
+2. **Proxy Attendance Vulnerability:** RFID cards, paper sign-ins, and standard barcode scans are easily passed between peers.
+3. **Absence of Temporal Verification:** Traditional sign-in mechanisms record a single binary check-in event at the start of class, failing to verify whether a student remained present throughout the academic period.
+4. **Hardware Rigidity:** Most commercial facial recognition systems require proprietary, expensive wall-mounted hardware and cannot leverage existing classroom infrastructure (laptops, mobile phones, or RTSP cameras).
 
-JOJIPA-SAMS introduces a vision-based continuous presence system:
+### 2.2 Project Objectives
+JOJIPA-SAMS is designed to solve these challenges through the following concrete engineering objectives:
+- **Zero-Friction Biometric Identification:** Rapid multi-face detection and recognition from live video feeds and uploaded classroom media.
+- **Universal Multi-Source Ingestion:** Seamless capture across Hardware Webcams, Mobile Stations (via QR pairing and WebSocket streaming), Network RTSP/CCTV cameras, and Uploaded Media files.
+- **Academic Timetable Synchronization:** Direct binding of attendance sessions to real collegiate timetables, subjects, and batch allocations (TE-B Computer Engineering).
+- **Audit Traceability & State Tracking:** Continuous presence auditing distinguishing between momentary occlusion and true classroom departure.
+- **Strict Data Integrity:** Enforcement of the single attendance record rule per student per session.
 
-- Scans the lecture hall automatically from front-facing camera feeds.
-- **Separates Recognition from Attendance:** Video recognition and presence states (`VISIBLE`, `TEMPORARILY_NOT_VISIBLE`, `LEFT`, `RETURNED`) update continuously, while database attendance is marked exactly **ONCE** per student.
-- Binds sessions to academic `Subject` entities (e.g. `CS401`) and `ClassSection` entities (e.g. `CSE-4A`).
-- Automatically reconciles absentees upon session closure by auto-populating enrolled students who were not detected.
+---
 
-## 6. Key Features
+## 3. System Architecture & High-Level Design
 
-- **Consolidated Real-Time Dashboard:** 5 KPI summary cards (Students, Face Enrolled, Present Today, Absent Today, Attendance Rate), Live Session Banner, Today's Attendance Table, Camera Stream Health, 14-Day Attendance Trends, Recent Activity Feed, and Actionable Exception Alerts.
-- **Academic Hierarchy Management:** Dedicated CRUD management for Subjects and Class Sections with duplicate code prevention and historical reference protection.
-- **Multi-Pose Face Enrollment:** 5-angle biometric capture (Front, Left 15°, Right 15°, Tilt Up, Tilt Down) with real-time pose and quality feedback.
-- **Live Classroom Presence Tracking:** Real-time bounding boxes with color-coded status pills (`KNOWN` in green, `UNCERTAIN` in amber, `UNKNOWN` in red).
-- **Flexible Camera Integration:** Support for standard USB Webcams, Smartphone Mobile Cameras, RTSP Security Cameras, and pre-recorded Video Files.
-- **Institutional Analytics & CSV Export:** Department-level attendance rates, student-level defaulter lists (<75% attendance), and RFC-4180 compliant CSV exports.
+JOJIPA-SAMS employs a decoupled, asynchronous micro-modular architecture divided into four primary tiers: Client Layer, API Gateway Layer, AI Inference Engine, and Persistence/Database Layer.
 
-## 7. System Users and Roles
+```mermaid
+flowchart TD
+    subgraph Client_Layer ["Client Tier (React 18 + Vite + HTTPS)"]
+        UI_Dash["Dashboard & Analytics"]
+        UI_Live["Live Attendance Monitor"]
+        UI_Media["Media Attendance (Image & Video)"]
+        UI_Time["Weekly Timetable (TE-B Grid)"]
+        UI_Cam["Camera & QR Pairing Management"]
+        UI_Mob["Mobile Camera Capture Station"]
+    end
 
-1. **Administrator (Superuser):** System configuration, user provisioning, system diagnostics, and audit trail inspection.
-2. **Faculty / Instructor:** Subject and class management, scheduling/closing sessions, live attendance monitoring, and manual overrides.
-3. **Student:** Personal attendance history inspection, attendance percentage tracking, and biometric enrollment status viewing.
+    subgraph API_Layer ["API & Transport Tier (FastAPI + Uvicorn + WebSockets)"]
+        Router["FastAPI APIRouter (/api/v1)"]
+        Auth_MW["JWT Security & CORS Middleware"]
+        WS_Hub["WebSocket Live Stream & Pairing Hub"]
+        RTSP_Mgr["RTSP Stream Worker Manager"]
+    end
 
-## 8. Complete System Workflow
+    subgraph Service_Tier ["Application & Domain Services Tier"]
+        Att_Svc["Attendance Service (Presence & Duplicate Guard)"]
+        Media_Svc["Media Attendance Service (Async Worker)"]
+        Class_Svc["Class & Timetable Service"]
+        Cam_Svc["Camera & Discovery Service"]
+        Stud_Svc["Student & Face Profile Service"]
+    end
 
-```
-┌─────────────────────────┐
-│  Academic Administrator │
-└────────────┬────────────┘
-             │ 1. Create Subject (CS401) & Class (CSE-4A)
-             ▼
-┌─────────────────────────┐
-│   Student Registration  │◄── Enrolls Multi-Pose Face Samples (ArcFace)
-└────────────┬────────────┘
-             │ 2. Schedule Session & Assign Camera
-             ▼
-┌─────────────────────────┐
-│   Attendance Session    │
-│    (Status: ACTIVE)     │
-└────────────┬────────────┘
-             │ 3. Ingest Video Frames (Webcam / Mobile / RTSP)
-             ▼
-┌─────────────────────────┐
-│  Deep Vision AI Engine  │
-│  SCRFD ──► ArcFace ──►  │
-│  Liveness ──► ByteTrack │
-└────────────┬────────────┘
-             │ 4. First Sighting: Mark PRESENT / LATE (Atomic 1-Time)
-             │ 5. Subsequent Sightings: Update Presence & Last Seen
-             ▼
-┌─────────────────────────┐
-│   Session Finalization  │──► Auto-Marks Unverified Students as ABSENT
-└────────────┬────────────┘
-             │ 6. Analytics, Audit Logs & RFC-4180 CSV Export
-             ▼
-┌─────────────────────────┐
-│   Reports & Analytics   │
-└─────────────────────────┘
-```
+    subgraph AI_Engine ["AI Vision & Recognition Engine (InsightFace + ONNX)"]
+        SCRFD["SCRFD-10G Face Detector"]
+        Aligner["5-Point Umeyama Affine Aligner"]
+        Quality["Laplacian & Illumination Analyzer"]
+        Pose["Euler Head Pose & Occlusion Estimator"]
+        ArcFace["ArcFace ResNet-50 512-d Extractor"]
+        Matcher["VectorMatcher (BLAS Dot Product)"]
+        Tracker["ByteTrack + Kalman Filter"]
+        Temporal["Sliding-Window Temporal Verifier"]
+    end
 
-## 9. High-Level Architecture
+    subgraph Persistence_Tier ["Persistence Tier (SQLAlchemy 2.0 Async)"]
+        DB[(SQLite / PostgreSQL Schema)]
+        Media_Store[("Local Media Storage (uploads/media/)")]
+    end
 
-```
-[ Mobile / Smartphone ]       [ Web Browser (React + TS) ]       [ IP / RTSP Camera ]
-         │                                  │                               │
-         ▼                                  ▼                               ▼
-┌───────────────────────────────────────────────────────────────────────────────────┐
-│                             Vite Dev / Nginx Gateway                              │
-│                               (HTTPS / WSS Reverse Proxy)                         │
-└─────────────────────────────────────────┬─────────────────────────────────────────┘
-                                          │
-                                          ▼
-┌───────────────────────────────────────────────────────────────────────────────────┐
-│                           JOJIPA-SAMS FastAPI Backend                             │
-│                                                                                   │
-│  ┌───────────────────────┐ ┌──────────────────────┐ ┌──────────────────────────┐  │
-│  │   Auth & Audit APIs   │ │  Dashboard & Reports │ │ Attendance & Presence    │  │
-│  └───────────────────────┘ └──────────────────────┘ └──────────────────────────┘  │
-│  ┌───────────────────────┐ ┌──────────────────────┐ ┌──────────────────────────┐  │
-│  │  Subject & Class APIs │ │  Camera Streaming    │ │ Recognition & Matcher    │  │
-│  └───────────────────────┘ └──────────────────────┘ └──────────────────────────┘  │
-└─────────────────────────────────────────┬─────────────────────────────────────────┘
-                                          │
-                                          ▼
-┌───────────────────────────────────────────────────────────────────────────────────┐
-│                           AI / Computer Vision Pipeline                           │
-│                                                                                   │
-│   [ SCRFD 10G-KPS ] ──► [ Affine Aligner ] ──► [ ArcFace ResNet-50 (512-dim) ]    │
-│            │                                                    │                 │
-│            ▼                                                    ▼                 │
-│   [ Laplacian Liveness ] ─────────────────────────► [ Cosine Vector Matcher ]     │
-│            │                                                    │                 │
-│            ▼                                                    ▼                 │
-│   [ Kalman ByteTracker ] ─────────────────────────► [ Temporal Consensus Voting ] │
-└─────────────────────────────────────────┬─────────────────────────────────────────┘
-                                          │
-                                          ▼
-┌───────────────────────────────────────────────────────────────────────────────────┐
-│                              Data & Persistence Layer                             │
-│                                                                                   │
-│   [ SQLite (Dev Mode) ]  /  [ PostgreSQL 16 + pgvector ]  /  [ SQLAlchemy 2.0 ]   │
-└───────────────────────────────────────────────────────────────────────────────────┘
+    UI_Dash & UI_Live & UI_Media & UI_Time & UI_Cam -->|HTTP REST / Axios| Router
+    UI_Mob <-->|Secure WebSockets / TLS| WS_Hub
+    Router --> Auth_MW --> Service_Tier
+    WS_Hub <--> Cam_Svc
+    RTSP_Mgr --> AI_Engine
+    Service_Tier --> AI_Engine
+    Service_Tier --> DB
+    Media_Svc --> Media_Store
 ```
 
-## 10. Frontend Architecture
-
-The frontend is built with **React 18, TypeScript, Tailwind CSS, and Vite**:
-
-- **Component Hierarchy:** Modular feature-based structure (`features/attendance`, `features/subjects`, `features/students`, `features/enrollment`, `features/live`, `features/cameras`, `features/reports`).
-- **State Management:** Local React hooks with asynchronous API service clients and defensive error boundaries.
-- **Real-Time Polling:** Dashboard automatically polls `/api/v1/dashboard/summary` every 8 seconds when active.
-- **Responsive Layout:** 5-column metric grid on desktop, 3-column on tablet, and single-column stacked layout on mobile.
-
-## 11. Backend Architecture
-
-The backend is built with **FastAPI, SQLAlchemy 2.0 (AsyncIO), and Pydantic v2**:
-
-- **Asynchronous Execution:** Async database transactions with connection pooling.
-- **Service Layer Pattern:** Clean separation between API controllers (`api/v1/`), business logic services (`services/`), and data models (`models/`).
-- **Structured JSON Logging:** Uniform log formatting with correlation tracking.
-
-## 12. Database Architecture
-
-The relational schema implements strict data integrity guarantees:
-
-- **`students` Table:** Student identification, roll numbers, department, class section, and enrollment status.
-- **`subjects` Table:** Unique course codes (`CS401`), title, credits, semester, department, and active status.
-- **`classes` Table:** Class section identifier (`CSE-4A`), department, semester, and section.
-- **`attendance_sessions` Table:** Session code, subject FK, class FK, scheduled date, time window, late threshold, and status.
-- **`attendance_records` Table:** Composite unique constraint `UNIQUE(session_id, student_id)` preventing duplicate records.
-- **`face_profiles` Table:** 512-dimensional vector embeddings, pose type, and quality scores.
-
-## 13. AI/CV Architecture
-
-The vision pipeline operates through 9 strictly decoupled stages:
-
-```
-Video Frame ──► [1. Detection: SCRFD] ──► [2. Quality & Pose Filter]
-                     │
-                     ▼
-             [3. Landmark Alignment]
-                     │
-                     ▼
-             [4. Embedding Extraction: ArcFace]
-                     │
-                     ▼
-             [5. Vector Matcher (Cosine Index)]
-                     │
-                     ▼
-             [6. Temporal Consensus Buffer]
-                     │
-                     ▼
-             [7. Passive Liveness Filter]
-                     │
-                     ▼
-             [8. ByteTrack Association]
-                     │
-                     ▼
-             [9. Attendance Decision / Presence Update]
-```
-
-## 14. Face Enrollment
-
-- **Target:** 5–10 multi-angle face samples per student.
-- **Required Poses:** Frontal direct gaze, Left 15°, Right 15°, Tilt Up (+15°), and Tilt Down (-15°).
-- **Validation Pipeline:** Images pass face count checks (must equal exactly 1), Laplacian blur validation, pose angle calculation, and embedding normalization before committing to the database.
-
-## 15. Face Detection
-
-Face detection utilizes **SCRFD-10G-KPS** (Sample and Computation Redistribution for Face Detection) with multi-scale feature pyramids. It detects bounding boxes and 5-point facial keypoints (eyes, nose, mouth corners) even in dense classroom seating.
-
-## 16. Face Recognition
-
-Recognition leverages in-memory cosine vector index structures synchronized with the relational database:
-$$\text{Similarity}(\vec{u}, \vec{v}) = \vec{u} \cdot \vec{v}$$
-
-- **Known:** $\text{Similarity} \ge 0.65$ with confidence margin $\ge 0.10$.
-- **Uncertain:** $0.45 \le \text{Similarity} < 0.65$.
-- **Unknown:** $\text{Similarity} < 0.45$.
-
-## 17. Face Embeddings
-
-Face embeddings are extracted using an **ArcFace ResNet-50** deep convolutional neural network. Each aligned face crop ($112 \times 112$) is mapped to a 512-dimensional floating-point unit vector:
-$$\vec{v} \in \mathbb{R}^{512}, \quad \|\vec{v}\|_2 = 1.0$$
-
-## 18. Multi-Face Recognition
-
-The system processes multiple bounding boxes per frame in parallel batches. In classroom tests with 3–5 simultaneous faces, inference completes in 28–45ms on CPU.
-
-## 19. Tracking
-
-Continuous identity tracking uses **ByteTrack** with a Kalman filter motion predictor. It maintains persistent track IDs ($T_{id}$) across video frames, preserving student identity during temporary posture shifts.
-
-## 20. Partial Occlusion Handling
-
-When lower-face occlusion (e.g. medical masks, scarves) is detected:
-
-- 5-point landmarks isolate the unoccluded periocular eye and forehead regions.
-- The temporal consensus buffer increases the required consecutive observation frames from 3 to 5 before confirming identity.
-
-## 21. Temporal Verification
-
-To eliminate transient single-frame false positives:
-
-- A rolling buffer of $W = 5$ frames is maintained per track ID.
-- Identity confirmation requires agreement across $\ge 60\%$ of frames in the window (3 out of 5 frames).
-
-## 22. Liveness / Anti-Spoofing
-
-Passive texture anti-spoofing evaluates high-frequency Fourier spectral distributions and color space chromatic variations to detect and reject digital screen replays and paper printouts.
-
-## 23. Attendance Engine
-
-Enforces the fundamental separation of concerns:
-$$\text{Recognition} \neq \text{Presence} \neq \text{Attendance}$$
-
-- **Recognition:** Frame-by-frame visual bounding box rendering (0 database writes).
-- **Presence:** In-memory tracking of whether a student is `VISIBLE`, `TEMPORARILY_NOT_VISIBLE`, or `LEFT`.
-- **Attendance:** Exactly **ONE** atomic database record per student per session (`PRESENT` or `LATE`).
-
-## 24. Subject and Class Management & Academic Curriculum
-
-Dedicated administrative modules manage academic subjects, vertical tracks, contact hours, credit allocations, and class sections. Submitting duplicate course codes or class names is rejected with clear validation feedback. Deleting a subject with historical session data triggers a safe soft-deactivation (`ACTIVE` $\to$ `INACTIVE`).
-
-### Official Academic Curriculum Structure (Department of Computer Engineering — Class TE-B)
-
-The system is configured with the official Third Year (TE-B) curriculum effective from `15/06/2026`:
-
-| Course Code      | Vertical | Course Title                                               | Theory Hrs | Tut Hrs | Prac Hrs | Theory Cr | Tut Cr | Prac Cr | Total Credits  |
-| :--------------- | :------- | :--------------------------------------------------------- | :--------: | :-----: | :------: | :-------: | :----: | :-----: | :------------: |
-| **24CSPC501C**   | PCC      | Theoretical Computer Science                               |     3      |    1    |    0     |     3     |   1    |    0    |     **4**      |
-| **24CSPC502C**   | PCC      | Soft Computing                                             |     2      |    0    |    2     |     2     |   0    |    1    |     **3**      |
-| **24CSPEC501XC** | PEC      | Program Elective – I                                       |     3      |    0    |    2     |     3     |   0    |    1    |     **4**      |
-| **24CSPEC502XC** | PEC      | Program Elective – II                                      |     2      |    0    |    2     |     2     |   0    |    1    |     **3**      |
-| **24MDM501XC**   | MDM      | Multidisciplinary Minor                                    |     3      |    0    |    2     |     3     |   0    |    1    |     **4**      |
-| **24OE501XC**    | OE       | Open Elective I                                            |     3      |    0    |    0     |     3     |   0    |    0    |     **3**      |
-| **24CSVSE501C**  | VSEC     | Employability Enhancement Program -IV (Web Technology Lab) |     0      |    0    |    2     |     0     |   0    |    1    |     **1**      |
-| **TOTAL**        |          |                                                            |   **16**   |  **1**  |  **10**  |  **16**   | **1**  |  **5**  | **22 Credits** |
-
-**Curriculum Credit Validation:**
-$$\sum \text{Credits} = 4 + 3 + 4 + 3 + 4 + 3 + 1 = 22\text{ Credits}$$
-
-The weekly schedule coordinates 34 timetable slots across Monday through Friday (09:00 to 17:00), accommodating lectures, split lab batches (`B1` / `B2`), designated room assignments (`CR 26`, `L5`, `L4`, `L6`, `L1`, `SL`), mandatory daily `LUNCH BREAK` periods (13:00–14:00), and institutional activity slots (`Mentoring`, `Library`, `H/M`). Idempotent seeding and migration are supported via `scripts/import_teb_curriculum.py`.
-
-## 25. Attendance Session Management
-
-Faculty schedule sessions by selecting a valid Subject, Class Section, Room, and scheduled start/end times. Starting a session transitions status to `ACTIVE`. Ending the session marks it `COMPLETED` and automatically registers all undetected roster students as `ABSENT`.
-
-## 26. Camera Architecture
-
-Supports USB Webcams, RTSP IP cameras (`rtsp://user:pass@ip:port/stream`), and pre-recorded video files. Stream health is dynamically computed based on relative frame arrival timestamps (`STREAMING`, `CONNECTED`, `NO_FRAME`, `OFFLINE`).
-
-## 27. Mobile Camera Architecture
-
-Enables wireless smartphones to stream classroom video:
-
-- Smartphone opens `https://<HOST_IP>:5173/mobile-camera?token=...`.
-- Acquires camera permissions via WebRTC `getUserMedia`.
-- Streams JPEG frames to `/api/v1/cameras/mobile-frame` for AI recognition.
-
-## 28. QR Pairing
-
-Desktop administrators generate cryptographically random pairing tokens (`secrets.token_urlsafe(16)`) rendered as a QR code. Scanning the QR code pairs the phone to the classroom session in under 5 seconds.
-
-## 29. Reports and Analytics
-
-- Computes overall institutional attendance percentage:
-  $$\text{Rate} = \frac{\text{Present} + \text{Late} + \text{Excused}}{\text{Total Expected Records}} \times 100\%$$
-- Highlights attendance defaulters ($< 75\%$) and critical defaulters ($< 65\%$).
-- Exports RFC-4180 compliant CSV spreadsheets.
-
-## 30. Manual Overrides
-
-Faculty can manually correct attendance records (e.g. converting `ABSENT` to `EXCUSED` or `MANUAL_PRESENT` with custom remarks) directly from the session roster.
-
-## 31. Audit Logging
-
-Every manual override, student profile creation, and session modification is permanently logged in the `audit_logs` table with actor ID, entity type, old values, new values, and ISO-8601 timestamps.
-
-## 32. Authentication and Security
-
-- Password hashing using salted `bcrypt`.
-- Stateless JWT HS256 tokens with configurable expiration claims.
-- Role-based authorization (`ADMIN`, `FACULTY`, `STUDENT`).
-
-## 33. Privacy and Biometric Data Handling
-
-Raw facial images are not stored as authentication secrets. SAMS exclusively stores mathematical embedding vectors ($\mathbb{R}^{512}$), which cannot be reconstructed into raw photographs.
-
-## 34. Error Handling
-
-- Custom exception hierarchy (`StudentAlreadyExistsError`, `SessionNotFoundError`, `DuplicateAttendanceError`).
-- Standardized RFC-7807 JSON error responses.
-- UI empty states, skeleton loaders, and retry triggers.
-
-## 35. Offline / Synchronization
-
-Edge synchronization queue (`SyncQueue`) stores attendance events locally during network outages and synchronizes idempotently via `/api/v1/sync/batch-push` upon reconnection.
-
-## 36. Technology Stack
-
-- **Frontend:** React 18, TypeScript, Tailwind CSS, Lucide Icons, Vite
-- **Backend:** FastAPI, Python 3.10+, SQLAlchemy 2.0 (AsyncIO), Pydantic v2, PyJWT, Bcrypt
-- **AI / Vision:** InsightFace, SCRFD-10G, ArcFace (ResNet-50), OpenCV, ONNX Runtime, ByteTrack
-- **Databases:** PostgreSQL 16 + pgvector / SQLite (aiosqlite)
-- **Deployment:** Docker, Docker Compose
-
-## 37. Repository Structure
-
-```
-JOJIPA-SAMS/
-├── backend/app/             # FastAPI REST & WebSocket application
-├── ai_engine/               # SCRFD, ArcFace, ByteTrack, and Liveness modules
-├── frontend/src/            # React 18 + TypeScript user interface
-├── scripts/                 # Optional demo database seeders
-├── tests/                   # 86 Pytest unit & integration tests
-├── .env.example             # Documented environment template
-├── docker-compose.yml       # Production containerization
-├── README.md                # System manual
-└── PROJECT_REPORT.md        # 46-section engineering specification
+---
+
+## 4. Technology & Dependency Inventory
+
+### 4.1 Backend Environment & Packages
+*Extracted directly from `pyproject.toml` and `requirements.txt`:*
+
+| Package / Module | Version Range | Purpose & Architectural Responsibility | Implementation Location |
+| :--- | :--- | :--- | :--- |
+| **Python** | 3.10 – 3.14.6 | Core runtime environment | Entire Backend |
+| **fastapi** | `>=0.115.0` | Asynchronous ASGI Web Framework, routing, OpenAPI specs | `backend/app/main.py` |
+| **uvicorn[standard]** | `>=0.30.0` | High-performance ASGI production server | `start.sh` |
+| **sqlalchemy** | `>=2.0.30` | Asynchronous ORM and SQL Expression Engine | `backend/app/database/base.py` |
+| **aiosqlite** | `>=0.20.0` | Non-blocking async SQLite driver for local database | `backend/app/database/session.py` |
+| **asyncpg** | `>=0.29.0` | High-speed async PostgreSQL driver for production deployment | `backend/app/database/session.py` |
+| **alembic** | `>=1.13.0` | Relational database schema migrations | `backend/alembic/` |
+| **pydantic** | `>=2.8.0` | Data modeling, request/response validation, settings | `backend/app/schemas/` |
+| **insightface** | `>=0.7.3` | Deep face analysis, SCRFD detection, landmark models | `ai_engine/detection/scrfd.py` |
+| **onnxruntime** | `>=1.18.0` | High-throughput ONNX model graph execution (CPU/CUDA) | `ai_engine/recognition/arcface.py` |
+| **opencv-python** | `>=4.10.0` | Computer vision primitives, image/video decoding, drawing | `ai_engine/alignment/face_aligner.py` |
+| **numpy** | `>=1.26.0` | Vectorized matrix transformations and mathematical ops | `ai_engine/recognition/vector_matcher.py` |
+| **scipy** | `>=1.12.0` | Hungarian Linear Sum Assignment for bounding box tracking | `ai_engine/tracking/byte_tracker.py` |
+| **scikit-learn** | `>=1.4.0` | Distance computations and statistical quality evaluation | `ai_engine/liveness/texture_checker.py` |
+| **pyjwt** | `>=2.8.0` | JSON Web Token encoding and signature verification | `backend/app/core/security.py` |
+| **bcrypt** | `>=4.1.0` | Salted SHA-256 password hashing for administrative auth | `backend/app/core/security.py` |
+| **pytest** | `>=8.2.0` | Automated test runner | `tests/` |
+
+### 4.2 Frontend Packages & Libraries
+*Extracted directly from `frontend/package.json`:*
+
+| Library | Version | Purpose & Usage |
+| :--- | :--- | :--- |
+| **react** / **react-dom** | `18.3.1` | Core declarative component UI library |
+| **typescript** | `5.6.3` | Static typing, interface definitions, compiler |
+| **vite** | `5.4.8` | Next-generation frontend bundler and dev server |
+| **@vitejs/plugin-basic-ssl** | `2.3.0` | Development HTTPS generator (required for WebRTC / mobile camera permissions) |
+| **tailwindcss** | `3.4.13` | Utility-first styling framework |
+| **lucide-react** | `0.453.0` | SVG iconography across all system views |
+| **axios** | `1.7.7` | HTTP REST client with interceptors |
+| **qrcode** | `1.5.4` | Canvas QR code generation for mobile camera pairing |
+| **clsx** / **tailwind-merge** | `2.1.1` / `2.5.4` | Dynamic CSS class merging utility |
+
+---
+
+## 5. Algorithms & Mathematical Formulations
+
+### 5.1 Face Detection: SCRFD-10G
+- **Algorithm:** Sample and Computation Redistribution for Efficient Face Detection (SCRFD-10G).
+- **Implementation:** `ai_engine/detection/scrfd.py` wrapping InsightFace `buffalo_l/det_10g.onnx`.
+- **Mathematical Principle:** Multi-scale feature pyramid network (FPN) with single-shot dense anchor regression for simultaneous bounding box coordinates $(x_1, y_1, x_2, y_2)$ and 5 facial keypoints (left eye, right eye, nose tip, left mouth corner, right mouth corner).
+- **Input:** BGR image tensor $(H \times W \times 3)$, normalized to input shape $640 \times 640$.
+- **Output:** Set of detections $\mathcal{D} = \{ (B_i, s_i, K_i) \}$ where $B_i \in \mathbb{R}^4$, $s_i \in [0, 1]$ is detection confidence, and $K_i \in \mathbb{R}^{5 \times 2}$ represents keypoint landmarks.
+- **Thresholds:** Detection threshold $s_{\text{det}} \ge 0.50$; Non-Maximum Suppression (NMS) IoU threshold $\theta_{\text{NMS}} = 0.40$.
+
+### 5.2 Face Alignment: Umeyama 5-Point Similarity Transform
+- **Algorithm:** Least-squares estimation of transformation parameters between two point patterns (Umeyama algorithm).
+- **Implementation:** `ai_engine/alignment/face_aligner.py`.
+- **Mathematical Principle:** Given source landmarks $K \in \mathbb{R}^{5 \times 2}$ and standard canonical reference landmarks $K^* \in \mathbb{R}^{5 \times 2}$ for a $112 \times 112$ crop:
+  $$\min_{R, t, c} \sum_{i=1}^5 \| c R k_i + t - k_i^* \|^2$$
+  where $c \in \mathbb{R}^+$ is scale, $R \in SO(2)$ is rotation, and $t \in \mathbb{R}^2$ is translation.
+- **Output:** Normalized, non-distorted $112 \times 112 \times 3$ aligned RGB face image ready for embedding extraction.
+
+### 5.3 Face Embedding: ArcFace (Additive Angular Margin Loss)
+- **Algorithm:** ArcFace ResNet-50 deep convolutional network (`w600k_r50.onnx`).
+- **Implementation:** `ai_engine/recognition/arcface.py`.
+- **Mathematical Principle:** Embeds facial features onto a 512-dimensional hypersphere where intra-class distance is minimized and inter-class discrepancy is maximized via an additive angular margin $m$:
+  $$L = -\log \frac{e^{s(\cos(\theta_{y_i} + m))}}{e^{s(\cos(\theta_{y_i} + m))} + \sum_{j \ne y_i} e^{s \cos \theta_j}}$$
+- **Input:** $112 \times 112 \times 3$ aligned image, normalized to $[-1.0, 1.0]$.
+- **Output:** $L_2$-normalized embedding vector $e \in \mathbb{R}^{512}$ such that $\|e\|_2 = 1.0$.
+
+### 5.4 Vector Similarity & 3-State Classification
+- **Algorithm:** Vectorized Cosine Similarity with Margin Disambiguation.
+- **Implementation:** `ai_engine/recognition/vector_matcher.py`.
+- **Mathematical Principle:** For query embedding $q \in \mathbb{R}^{512}$ and gallery matrix $G \in \mathbb{R}^{N \times 512}$ consisting of $N$ enrolled template vectors:
+  $$S = G \cdot q^T \in [-1.0, 1.0]^N$$
+  Let $s_1 = \max(S)$ corresponding to candidate $c_1$, and $s_2$ be the highest similarity score for any candidate $c_j \ne c_1$.
+- **Decision Logic:**
+  - $\text{KNOWN}$ if $s_1 \ge 0.58$ and $(s_1 - s_2) \ge 0.05$ (or single enrolled match).
+  - $\text{UNCERTAIN}$ if $0.40 \le s_1 < 0.58$ or $(s_1 - s_2) < 0.05$.
+  - $\text{UNKNOWN}$ if $s_1 < 0.40$.
+
+### 5.5 Multi-Object Tracking: ByteTrack + Kalman Filtering
+- **Algorithm:** ByteTrack two-stage association with Kalman bounding box state estimation.
+- **Implementation:** `ai_engine/tracking/byte_tracker.py` and `ai_engine/tracking/kalman_filter.py`.
+- **State Vector:** $x = [u, v, s, r, \dot{u}, \dot{v}, \dot{s}]^T$ where $(u, v)$ is bounding box center, $s$ is scale (area), and $r$ is aspect ratio.
+- **Two-Stage Association:**
+  1. *First Association:* Associate high-score detections ($s \ge 0.50$) with existing confirmed tracks using IoU cost matrix and Hungarian matching ($\text{threshold} = 0.30$).
+  2. *Second Association:* Associate remaining unassigned tracks with low-score detections ($0.20 \le s < 0.50$) to prevent track destruction during brief occlusions or motion blur.
+- **Lost Track Retention:** Tracks remain alive in memory for up to 15 frames ($\approx 0.5\text{s}$ to $1.5\text{s}$) before eviction.
+
+### 5.6 Temporal Verification & Consensus Accumulation
+- **Algorithm:** Sliding-Window Majority Voting with Exponential Time Weighting.
+- **Implementation:** `ai_engine/verification/temporal_verifier.py`.
+- **Operational Rules:**
+  - Sliding window buffer of $W = 7$ observations per track ID.
+  - Requires at least $M = 4$ valid, high-quality, unoccluded frames.
+  - Consistency ratio: $\frac{\text{votes}(c^*)}{\text{total valid frames}} \ge 0.75$.
+  - Average confidence across valid frames: $\bar{s} \ge 0.58$.
+- **Result:** Converts unstable per-frame detections into a single hardened, tamper-resistant identity confirmation.
+
+### 5.7 Image Quality Assessment & Blur Metric
+- **Algorithm:** Modified Laplacian Variance and Grayscale Illumination Histogramming.
+- **Implementation:** `ai_engine/quality/quality_analyzer.py`.
+- **Metrics:**
+  - *Sharpness:* $\text{Var}(\nabla^2 I) = \frac{1}{N}\sum (L(x, y) - \mu_L)^2 \ge 50.0$.
+  - *Illumination:* $40.0 \le \mu_{\text{gray}} \le 230.0$.
+  - *Contrast:* $\sigma_{\text{gray}} \ge 15.0$.
+  - *Minimum Face Dimensions:* $60 \times 60$ pixels.
+
+### 5.8 Head Pose & Landmark Occlusion Estimation
+- **Algorithm:** 5-Point Trigonometric Geometric Pose Estimation.
+- **Implementation:** `ai_engine/quality/pose_estimator.py`.
+- **Metrics:**
+  - $\text{Roll} = \arctan2(\Delta y_{\text{eyes}}, \Delta x_{\text{eyes}})$.
+  - $\text{Yaw} = 75.0 \times \frac{d(\text{nose}, \text{left eye}) - d(\text{nose}, \text{right eye})}{d(\text{left eye}, \text{right eye})}$.
+  - $\text{Pitch} = 60.0 \times \frac{y_{\text{nose}} - y_{\text{eye mid}}}{y_{\text{mouth mid}} - y_{\text{eye mid}}}$.
+  - *Frontal Quality Check:* $|\text{Yaw}| \le 55^\circ$, $|\text{Pitch}| \le 45^\circ$, $|\text{Roll}| \le 35^\circ$.
+
+---
+
+## 6. End-to-End AI Recognition Pipeline
+
+```mermaid
+flowchart TD
+    Frame[Input Video Frame / Image] --> Color[Decode BGR Image Matrix]
+    Color --> SCRFD[SCRFD-10G Face Detector]
+    SCRFD --> BBoxCheck{Faces Detected?}
+    BBoxCheck -->|No| EndFrame[Return Empty Results]
+    BBoxCheck -->|Yes| ForEach[For Each Detected Face]
+    
+    ForEach --> Quality[Quality Check: Sharpness & Light]
+    ForEach --> Pose[Pose Check: Yaw, Pitch, Roll]
+    Quality & Pose --> Filter{Valid Face Quality?}
+    
+    Filter -->|No| TrackLow[Pass to ByteTrack Stage 2]
+    Filter -->|Yes| Align[Umeyama 5-Point Alignment 112x112]
+    
+    Align --> ArcFace[ArcFace ONNX 512-d Embedding]
+    ArcFace --> Norm[L2 Normalization]
+    Norm --> Match[VectorMatcher vs Enrolled Gallery]
+    
+    Match --> Classify{Match State}
+    Classify -->|KNOWN| TempVer[Temporal Verifier Buffer]
+    Classify -->|UNCERTAIN| TrackUncert[Log Uncertain Observation]
+    Classify -->|UNKNOWN| TrackUnk[Log Unknown Observation]
+    
+    TempVer --> Consensus{Temporal Consensus Met? 4/7 frames}
+    Consensus -->|Yes| Presence[Presence FSM: VISIBLE]
+    Consensus -->|No| Pending[Accumulate Sighting]
+    
+    Presence --> MarkAtt{Already Marked in Session?}
+    MarkAtt -->|No| Record[Create Attendance Record in DB]
+    MarkAtt -->|Yes| UpdatePres[Update last_seen & Confidence]
 ```
 
-## 38. Installation
+---
 
+## 7. Attendance Engine & Presence State Machine
+
+### 7.1 Single Attendance Record Guarantee
+JOJIPA-SAMS enforces the fundamental invariant:
+$$\mathbf{1\text{ Student}} + \mathbf{1\text{ Session}} = \mathbf{1\text{ Attendance Record}}$$
+
+Regardless of whether a student appears in front of a camera for 5 seconds or 50 minutes (triggering hundreds of recognition events), only one master record is created in the database.
+
+- **Level 1 (Application Memory Check):** In-memory set tracking inside `PresenceService` prevents redundant database insert requests.
+- **Level 2 (Service Query Check):** `AttendanceService.mark_attendance` queries for an existing record matching `(session_id, student_id)`. If present, it updates telemetry metadata (`last_seen`, `confidence`, `track_id`) without duplicating rows.
+- **Level 3 (Relational Constraint):** Database schema enforces `UniqueConstraint("session_id", "student_id", name="uq_session_student")` on table `attendance_records`.
+
+### 7.2 Presence Finite State Machine
+Classroom engagement is tracked via real-time presence states:
+1. **`VISIBLE`**: Student is currently detected in camera view with active temporal confirmation.
+2. **`TEMPORARILY_NOT_VISIBLE`**: Student was briefly obstructed (e.g. peer walking past, looking down at notebook). Track is preserved for up to 30 seconds without changing attendance standing.
+3. **`RETURNED`**: Student re-enters the camera detection zone after a temporary occlusion.
+4. **`LEFT` / `NOT_VISIBLE`**: Student has departed the camera coverage area for greater than the configured timeout threshold.
+
+---
+
+## 8. Academic Management & College Timetable Integration
+
+### 8.1 Official Academic Structure (Department of Computer Engineering)
+JOJIPA-SAMS is directly populated with authentic academic data from the official timetable for class **TE-B (Effective From: 15/06/2026)**:
+
+| Course Code | Subject Name | Type | Faculty Abbr. | Room / Lab | Batches |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **24CSPC501C** | Theoretical Computer Science (TCS) | Theory / Lab | `DM` | `CR 26` / `SL` | Whole Class / `B1`, `B2` |
+| **24CSPC502C** | System Computing (SC) | Theory / Lab | `SKP` | `L4` / `SL` | Whole Class / `B1`, `B2` |
+| **24MDM501XC** | Multi-Disciplinary Minor (MDM) | Theory / Lab | `PG` | `CR 26` / `L1` | Whole Class |
+| **24OE501XC** | Open Elective – I (OE-I) | Elective | Various | `CR 26` | Whole Class |
+| **24VSE501C** | Web Technology Lab (WTL) | Practical Lab | `SP` | `L5` / `L6` | `B1`, `B2` |
+| *—* | Artificial Intelligence & Machine Learning (AIML) | Theory / Lab | `DN` | `CR 26` / `L5` | Whole Class / `B1`, `B2` |
+| *—* | Cyber Security & Forensics (CSS) | Theory | `DM` | `CR 26` | Whole Class |
+| *—* | Mentoring / Library / H/M | Activity | Various | Campus | Whole Class |
+
+### 8.2 Weekly Timetable Grid & Batch Modeling
+- **Weekly Structure:** Complete 8-period $\times$ 5-day matrix (Monday through Friday, 09:00 AM – 05:00 PM).
+- **Batch Handling in Same Cell:** During concurrent lab sessions (e.g., Tuesday 14:00–16:00: `B1 - SC - SKP - L4` and `B2 - AIML - DN - L5`), both batch sub-blocks are rendered **within the same timetable grid cell** with independent session creation buttons.
+- **Timetable-Driven Session Creation:** Instructors select a timetable slot to immediately create and bind an attendance session without manual entry of subject names, rooms, or times.
+
+---
+
+## 9. Camera Architecture & Ingestion Modes
+
+```mermaid
+flowchart LR
+    subgraph Capture_Sources ["Camera Capture Modalities"]
+        USB[Hardware / USB Webcam]
+        Phone[Mobile Phone Station]
+        CCTV[CCTV RTSP Network Stream]
+        Media[Uploaded Photo / Video]
+    end
+
+    subgraph Ingestion_Pipeline ["Ingestion & Normalization Engine"]
+        Browser_API[HTML5 MediaDevices API]
+        QR_WS[WebSocket Pairing Hub]
+        OpenCV_Worker[RTSP Worker Thread + Ring Buffer]
+        FFmpeg_Dec[OpenCV VideoCapture Decoder]
+    end
+
+    USB --> Browser_API
+    Phone --> QR_WS
+    CCTV --> OpenCV_Worker
+    Media --> FFmpeg_Dec
+
+    Browser_API & QR_WS & OpenCV_Worker & FFmpeg_Dec --> AI_Ingest[Frame Ingestion Buffer]
+    AI_Ingest --> Face_Pipeline[AI Recognition Pipeline]
+```
+
+1. **Hardware / Integrated Webcams:** Captured natively via browser `navigator.mediaDevices.getUserMedia()` with configurable resolution ($1280 \times 720$).
+2. **Mobile Camera Capture Station:**
+   - Laptop displays a dynamically generated pairing QR code with a cryptographically secure token (`secrets.token_urlsafe(24)`).
+   - Instructor/operator scans QR code on any modern smartphone connected to local Wi-Fi.
+   - Mobile client opens `https://<local-ip>:5173/mobile-camera`, captures video stream from back/front camera, and streams JPEG frames over TLS-secured WebSockets.
+   - Laptop receives frames in real-time and displays the live phone feed in the attendance monitor.
+3. **CCTV / RTSP IP Cameras:**
+   - Managed via `ai_engine/streaming/rtsp_worker.py`.
+   - Runs a dedicated background reader thread using `cv2.VideoCapture("rtsp://...")` with TCP transport flags and a non-blocking 1-frame ring buffer to eliminate stream latency buildup.
+4. **Media Attendance (Image & Video Processing):**
+   - *Image Mode:* Upload high-resolution classroom group photos (JPG/PNG/WEBP) to detect multiple students simultaneously and mark attendance (`source="MEDIA_IMAGE"`).
+   - *Video Mode:* Upload pre-recorded lecture recordings (MP4/AVI/MKV). Video is sampled at configurable FPS (e.g. 3 FPS), tracked with ByteTrack, and logs `first_seen` and `last_seen` timestamps (`source="MEDIA_VIDEO"`).
+
+---
+
+## 10. Database Design & Relational Schema
+
+The relational schema is defined declaratively using SQLAlchemy Async in `backend/app/models/entities.py`:
+
+```mermaid
+erDiagram
+    ClassSection ||--o{ Student : "contains"
+    ClassSection ||--o{ Batch : "has"
+    ClassSection ||--o{ TimetableEntry : "schedules"
+    Subject ||--o{ TimetableEntry : "mapped_to"
+    Subject ||--o{ AttendanceSession : "conducted_for"
+    ClassSection ||--o{ AttendanceSession : "attends"
+    Student ||--o{ FaceProfile : "owns"
+    Student ||--o{ AttendanceRecord : "records"
+    AttendanceSession ||--o{ AttendanceRecord : "logs"
+    AttendanceSession ||--o{ PresenceEvent : "tracks"
+    Camera ||--o{ AttendanceSession : "captures"
+    Camera ||--o{ MobilePairingSession : "pairs"
+    AttendanceSession ||--o{ MediaProcessingJob : "processes"
+    User ||--o{ AuditLog : "triggers"
+
+    ClassSection {
+        string id PK
+        string name
+        string department
+        int year
+        int semester
+        string status
+    }
+
+    Student {
+        string id PK
+        string student_code UK
+        string roll_number UK
+        string first_name
+        string last_name
+        string class_name
+        string status
+    }
+
+    FaceProfile {
+        string id PK
+        string student_id FK
+        json embedding_data
+        string model_name
+        float quality_score
+        string pose_type
+    }
+
+    AttendanceSession {
+        string id PK
+        string session_code UK
+        string subject
+        string class_name
+        date scheduled_date
+        time start_time
+        time end_time
+        string status
+    }
+
+    AttendanceRecord {
+        string id PK
+        string session_id FK
+        string student_id FK
+        string status
+        string source
+        float confidence
+        datetime first_seen
+        datetime last_seen
+    }
+```
+
+---
+
+## 11. REST API Specification
+
+All endpoints are registered under `/api/v1` in `backend/app/api/v1/router.py`:
+
+| Method | Endpoint | Description & Architectural Responsibility |
+| :--- | :--- | :--- |
+| `GET` | `/api/v1/health` | System health probe, database status, AI model availability |
+| `POST` | `/api/v1/auth/token` | User login and JWT access token issuance |
+| `GET` | `/api/v1/students` | List enrolled students with pagination and class filters |
+| `POST` | `/api/v1/students` | Register a new student profile |
+| `POST` | `/api/v1/recognition/enroll` | Enroll face embeddings for a student from uploaded portrait images |
+| `POST` | `/api/v1/recognition/verify` | Single-frame 1:1 or 1:N face verification against gallery index |
+| `GET` | `/api/v1/subjects` | List academic subjects, contact hours, and credit structures |
+| `GET` | `/api/v1/classes` | List academic classes, divisions, and batches |
+| `GET` | `/api/v1/classes/{class_id}/timetable` | Get weekly college timetable grid slots with date-specific session links |
+| `POST` | `/api/v1/attendance/sessions` | Create a new scheduled/active attendance session |
+| `GET` | `/api/v1/attendance/sessions` | List attendance sessions with date, subject, and status filters |
+| `PUT` | `/api/v1/attendance/sessions/{id}/start` | Start an attendance session (`SCHEDULED` $\to$ `ACTIVE`) |
+| `PUT` | `/api/v1/attendance/sessions/{id}/close` | Finalize session (`COMPLETED`) and auto-mark absentees |
+| `POST` | `/api/v1/attendance/sessions/{id}/mark` | Record a verified student attendance record |
+| `GET` | `/api/v1/attendance/sessions/{id}/records` | Retrieve all attendance records for a session |
+| `POST` | `/api/v1/media-attendance/image` | Process classroom group photo and mark student attendance |
+| `POST` | `/api/v1/media-attendance/video` | Submit recorded classroom video for background processing |
+| `POST` | `/api/v1/media-attendance/analyze-image` | Development diagnostic endpoint returning raw face boxes & metrics |
+| `GET` | `/api/v1/media-attendance/jobs` | List media processing jobs and background progress |
+| `POST` | `/api/v1/media-attendance/jobs/{id}/cancel`| Cancel active video processing job |
+| `GET` | `/api/v1/cameras` | List configured hardware, mobile, and RTSP cameras |
+| `POST` | `/api/v1/cameras` | Register a new camera device |
+| `POST` | `/api/v1/cameras/{id}/mobile-pair` | Generate QR pairing session and token for mobile phone stream |
+| `GET` | `/api/v1/cameras/{id}/test` | Diagnostic connection probe for RTSP / webcam devices |
+| `GET` | `/api/v1/reports/attendance` | Generate filtered attendance reports (daily, weekly, monthly, subject) |
+| `GET` | `/api/v1/audit/logs` | Query administrative audit trail and security events |
+| `WS` | `/api/v1/stream/ws/mobile-sync` | WebSocket for mobile camera frame transfer and live preview |
+
+---
+
+## 12. Security, Privacy & Compliance
+
+1. **Authentication & Access Control:**
+   - OAuth2 Password Bearer flow with salted SHA-256 (Bcrypt) passwords.
+   - Cryptographically signed JSON Web Tokens (HMAC-SHA256) with configurable TTL (default 8 hours).
+2. **Biometric Privacy & Template Protection:**
+   - Raw facial images are not stored permanently unless explicitly retained for enrollment audits.
+   - Biometric gallery stores only mathematical 512-dimensional floating-point vectors ($L_2$-normalized). These vectors cannot be reverse-engineered into original photographic likenesses.
+3. **Mobile Stream Protection:**
+   - Mobile pairing sessions use cryptographically random 24-byte tokens (`secrets.token_urlsafe(24)`) expiring after 10 minutes.
+   - Frontend and mobile streaming endpoints operate over TLS/HTTPS (`@vitejs/plugin-basic-ssl`) to satisfy browser camera security constraints.
+4. **Audit Trail:**
+   - Critical events (`SESSION_STARTED`, `SESSION_CLOSED`, `ATTENDANCE_MARKED`, `MEDIA_IMAGE_ATTENDANCE`, `MEDIA_VIDEO_ATTENDANCE_COMPLETED`) are recorded in the `audit_logs` database table.
+
+---
+
+## 13. Verification, Testing & QA Results
+
+The system has undergone rigorous automated and live-hardware verification.
+
+### 13.1 Automated Pytest Suite Summary
+The entire test suite was executed using Pytest in the local virtual environment:
+
+```text
+======================== 100 passed, 1 warning in 36.06s ========================
+```
+
+| Test Domain | Target Modules | Tests Run | Result |
+| :--- | :--- | :---: | :---: |
+| **Face Detection & Pipeline** | `SCRFD`, `FacePipeline`, `QualityAnalyzer` | 12 | **`100% PASSED`** |
+| **Vector Matching & ArcFace** | `ArcFace`, `VectorMatcher`, `TemporalVerifier` | 11 | **`100% PASSED`** |
+| **Tracking & Occlusion** | `ByteFaceTracker`, `KalmanBoxTracker` | 5 | **`100% PASSED`** |
+| **Attendance & Duplicate Guard** | `AttendanceService`, `PresenceService` | 10 | **`100% PASSED`** |
+| **Media Attendance (Image/Video)**| `MediaAttendanceService`, `MediaAPI` | 6 | **`100% PASSED`** |
+| **Camera Multi-Source & RTSP** | `CameraService`, `RTSPStreamWorker` | 17 | **`100% PASSED`** |
+| **Academic Timetable & Grid** | `ClassService`, `test_official_teb_timetable_grid.py` | 4 | **`100% PASSED`** |
+| **REST API Integration** | API Endpoints (Auth, Students, Subjects, Reports) | 35 | **`100% PASSED`** |
+| **Total Automated Tests** | **Full System Suite** | **100** | **`100 Passed (0 Failed)`** |
+
+---
+
+## 14. Real-World Limitations & Constraints
+
+To maintain documentation integrity, real-world constraints are explicitly acknowledged:
+
+1. **Passive Liveness Limitation in Static Photos:**
+   - Single still images cannot reliably evaluate micro-motion or dynamic depth. As documented in the UI and API, static photo attendance relies on 2D texture gradients and facial structure.
+2. **Extreme Head Pose Deviations:**
+   - Faces rotated beyond $55^\circ$ Yaw (profile view) or $45^\circ$ Pitch lack sufficient bilateral landmark visibility for ArcFace affine alignment and are filtered out by the quality analyzer.
+3. **Severe Illumination Deficits:**
+   - Environments with ambient brightness below 40.0 intensity or extreme backlighting glare trigger quality rejections to prevent false positive identifications.
+4. **Wi-Fi Network Constraints for Mobile Streaming:**
+   - High-bitrate mobile camera streaming requires adequate local Wi-Fi bandwidth. Weak wireless connectivity may introduce frame drops during real-time preview.
+
+---
+
+## 15. Future Scope & Roadmap
+
+Features identified for future development iterations (currently not implemented):
+- **3D Depth Sensor Integration:** Native hardware support for structured light or Time-of-Flight (ToF) cameras for physical 3D liveness detection.
+- **Edge Deployment (NVIDIA Jetson / NPU):** TensorRT and INT8 quantization for ultra-low-power standalone classroom edge appliances.
+- **Institutional ERP / LMS Connector:** Direct bidirectional sync with Moodle, Canvas, and university SAP/ERP systems via LTI 1.3 standards.
+
+---
+
+## 16. Installation, Configuration & Run Guide
+
+### 16.1 Prerequisites
+- Linux OS (Ubuntu 22.04 LTS or newer recommended)
+- Python 3.10+ (Python 3.14 compatible)
+- Node.js 18+ & PNPM / NPM
+- ONNX Runtime and OpenCV dependencies (`libgl1-mesa-glx`, `libglib2.0-0`)
+
+### 16.2 Setup Commands
 ```bash
-git clone https://github.com/Joyson01/SAMS.git
-cd SAMS
+# 1. Clone repository and navigate to root
+cd "SAMS Mark-2"
+
+# 2. Set up Python virtual environment
 python3 -m venv .venv
 source .venv/bin/activate
+pip install --upgrade pip
 pip install -r requirements.txt
-cd frontend && pnpm install && cd ..
+
+# 3. Install frontend dependencies
+cd frontend
+pnpm install
+cd ..
+
+# 4. Initialize Database & Official Timetable Data
+python3 scripts/import_teb_timetable.py
 ```
 
-## 39. Execution Instructions
-
+### 16.3 Starting the System
 ```bash
-# Start Backend API
-python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
+# Start all backend and frontend services
+./start.sh
 
-# Start Frontend App
-cd frontend && pnpm run dev --host 0.0.0.0 --port 5173
+# Stop all background services
+./scripts/stop.sh
 ```
 
-## 40. Mobile Setup
+### 16.4 Application Access Points
+- **Web Dashboard:** `https://localhost:5173`
+- **Mobile Camera Stream Station:** `https://<your-local-ip>:5173/mobile-camera`
+- **FastAPI Documentation (Swagger UI):** `http://localhost:8000/docs`
+- **Health Check:** `http://localhost:8000/health`
 
-1. Connect PC and phone to same Wi-Fi.
-2. Open `https://<PC_IP>:5173/` on desktop.
-3. In **Cameras**, click **Add Mobile Camera** $\to$ **Generate QR Code**.
-4. Scan with phone camera and tap **Start Camera**.
+---
 
-## 41. Testing Methodology
+## 17. Conclusion
 
-- **Unit Testing:** Isolated tests for ArcFace embeddings, cosine matching, ByteTrack Kalman filter, pose estimators, and quality analyzers.
-- **Service Layer Testing:** Database transaction integrity, deduplication, and presence lifecycle transitions.
-- **Integration API Testing:** HTTP endpoint verification.
-- **End-to-End Workflow Testing:** 18-step master automated script verifying full lifecycle.
-
-## 42. Test Results
-
-```
-Pytest Automated Suite:    86 passed, 1 warning in 32.10s (100% pass)
-Master E2E Workflow Script: 18 / 18 stages verified successfully
-Frontend Production Build: Built in 2.19s (0 TypeScript errors)
-```
-
-## 43. Current Implementation Status
-
-- **WORKING:** Face detection, multi-pose enrollment, ArcFace recognition, ByteTrack tracking, 1-time attendance marking, continuous presence, subject/class CRUD, live session management, consolidated dashboard, mobile QR pairing, reports, manual overrides, audit logging.
-- **PARTIAL:** Distributed multi-campus edge sync daemon.
-- **PLANNED:** Active challenge-response 3D depth anti-spoofing, native mobile apps.
-
-## 44. Known Limitations
-
-1. **Extreme Head Poses ($> 35^\circ$):** Discarded by quality analyzer to prevent false match contamination.
-2. **Low Illumination ($< 20$ lux):** Dim lighting triggers blur/contrast rejections.
-3. **Browser Security:** Camera streaming requires HTTPS (or `localhost`).
-
-## 45. Future Enhancements
-
-- CUDA/TensorRT GPU acceleration for massive lecture auditoriums ($> 300$ students).
-- Automated SMS/Email webhook notifications for consecutive absences.
-
-## 46. Conclusion
-
-**JOJIPA-SAMS** delivers an automated, high-precision Face Attendance Management System tailored for modern academic institutions. By replacing error-prone manual roll calls with an intelligent computer vision pipeline and an intuitive web dashboard, **JOJIPA-SAMS** ensures complete attendance integrity, eliminates proxy marking, and recovers valuable instructional time.
+JOJIPA-SAMS delivers a verified, highly accurate, and scalable attendance management ecosystem. By combining high-performance deep learning models (SCRFD and ArcFace) with robust multi-object tracking (ByteTrack), temporal consensus verification, multi-camera capture flexibility, and seamless college timetable synchronization, the system eliminates manual administrative overhead while providing uncompromised audit integrity.
