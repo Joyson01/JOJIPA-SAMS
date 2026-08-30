@@ -59,9 +59,7 @@ async def test_full_sams_workflow():
         print(f"[✓] 4. Student created: {student['first_name']} {student['last_name']} (ID: {student_id})")
 
         # 4. Enroll Student Face
-        img_path = "src/Test/pankaj.jpg"
-        if not os.path.exists(img_path):
-            img_path = "scratch/test_faces/rohan.jpg"
+        img_path = "tests/fixtures/pankaj.jpg"
 
         with open(img_path, "rb") as f:
             enroll_res = await client.post(

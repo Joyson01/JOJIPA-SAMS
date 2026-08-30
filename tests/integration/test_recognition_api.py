@@ -30,7 +30,7 @@ async def test_recognition_api_thresholds_endpoints(client):
 
 @pytest.mark.asyncio
 async def test_recognition_api_process_image(client):
-    test_img_path = WORKSPACE_ROOT / "src" / "Test" / "pankaj.jpg"
+    test_img_path = WORKSPACE_ROOT / "tests" / "fixtures" / "pankaj.jpg"
     if not test_img_path.exists():
         pytest.skip("Test image not found")
 

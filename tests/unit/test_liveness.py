@@ -18,7 +18,7 @@ def liveness_detector():
 
 
 def test_genuine_face_passes_liveness(liveness_detector):
-    pankaj_path = WORKSPACE_ROOT / "data" / "students" / "Pankaj" / "pankaj_img1.jpg"
+    pankaj_path = WORKSPACE_ROOT / "tests" / "fixtures" / "pankaj.jpg"
     if not pankaj_path.exists():
         pytest.skip("Dataset image not found")
 

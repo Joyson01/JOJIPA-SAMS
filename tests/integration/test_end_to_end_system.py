@@ -86,7 +86,7 @@ async def test_full_enterprise_sams_workflow_end_to_end(test_db_session, client)
     )
 
     # Enroll real image embedding for Pankaj
-    img_path = WORKSPACE_ROOT / "src" / "Test" / "pankaj.jpg"
+    img_path = WORKSPACE_ROOT / "tests" / "fixtures" / "pankaj.jpg"
     pipeline = get_pipeline()
 
     if img_path.exists():

@@ -17,17 +17,15 @@ def test_partial_occlusion_recovery_and_confirmation():
     -> Student partially occluded by hand/obstacle (Frames 2-3) -> Tracker holds track ID & state
     -> Clear frames reappear (Frames 4-5) -> Temporal verifier confirms identity!
     """
-    pankaj_img1_path = WORKSPACE_ROOT / "data" / "students" / "Pankaj" / "pankaj_img1.jpg"
-    pankaj_test_path = WORKSPACE_ROOT / "src" / "Test" / "pankaj.jpg"
+    pankaj_test_path = WORKSPACE_ROOT / "tests" / "fixtures" / "pankaj.jpg"
 
-    if not pankaj_img1_path.exists() or not pankaj_test_path.exists():
+    if not pankaj_test_path.exists():
         pytest.skip("Dataset images not found on disk")
 
     pipeline = VideoRecognitionPipeline(detection_interval=1)
 
     # 1. Enroll Pankaj
-    img_enroll = cv2.imread(str(pankaj_img1_path))
-    ok, emb, q, pose, _ = pipeline.detector._app and pipeline.embedder.extract_from_image(img_enroll, pipeline.detector.detect(img_enroll)[0].landmarks), None, None, None, None
+    img_enroll = cv2.imread(str(pankaj_test_path))
     emb_p = pipeline.embedder.extract_from_image(img_enroll, pipeline.detector.detect(img_enroll)[0].landmarks)
 
     template = EnrolledTemplate("p1", "s_pankaj", "STU-001", "CSE-01", "Pankaj", emb_p, 0.95, "FRONT")
