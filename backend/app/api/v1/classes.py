@@ -1,3 +1,4 @@
+from datetime import date
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +12,7 @@ from backend.app.schemas.class_section import (
 from backend.app.schemas.timetable import (
     TimetableEntryCreate,
     TimetableEntryResponse,
+    TimetableEntryUpdate,
 )
 from backend.app.services.class_service import ClassService
 
@@ -59,9 +61,41 @@ async def list_classes(
 async def list_all_timetable_entries(
     class_id: Optional[str] = Query(None),
     day_of_week: Optional[str] = Query(None),
+    scheduled_date: Optional[date] = Query(None, description="Calendar date for day-of-week and conflict detection"),
     db: AsyncSession = Depends(get_db),
 ) -> List[TimetableEntryResponse]:
-    return await ClassService.list_timetable_entries(db, class_id=class_id, day_of_week=day_of_week)
+    return await ClassService.list_timetable_entries(
+        db=db,
+        class_id=class_id,
+        day_of_week=day_of_week,
+        scheduled_date=scheduled_date,
+    )
+
+
+@router.put(
+    "/timetable/entries/{entry_id}",
+    response_model=TimetableEntryResponse,
+    summary="Update Timetable Slot / Map Subject",
+)
+async def update_timetable_entry(
+    entry_id: str,
+    update_in: TimetableEntryUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> TimetableEntryResponse:
+    return await ClassService.update_timetable_entry(db, entry_id, update_in)
+
+
+@router.delete(
+    "/timetable/entries/{entry_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete Timetable Slot",
+)
+async def delete_timetable_entry(
+    entry_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    await ClassService.delete_timetable_entry(db, entry_id)
+    return None
 
 
 @router.get(
@@ -84,9 +118,15 @@ async def get_class(
 async def get_class_timetable(
     class_id: str,
     day_of_week: Optional[str] = Query(None),
+    scheduled_date: Optional[date] = Query(None, description="Calendar date for day-of-week and conflict detection"),
     db: AsyncSession = Depends(get_db),
 ) -> List[TimetableEntryResponse]:
-    return await ClassService.list_timetable_entries(db, class_id=class_id, day_of_week=day_of_week)
+    return await ClassService.list_timetable_entries(
+        db=db,
+        class_id=class_id,
+        day_of_week=day_of_week,
+        scheduled_date=scheduled_date,
+    )
 
 
 @router.post(

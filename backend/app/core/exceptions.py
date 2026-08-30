@@ -75,6 +75,16 @@ class SessionAlreadyExistsError(SAMSException):
         )
 
 
+class SessionConflictError(SAMSException):
+    def __init__(self, message: str, existing_session_id: Optional[str] = None):
+        super().__init__(
+            status_code=status.HTTP_409_CONFLICT,
+            error_code="SESSION_CONFLICT",
+            message=message,
+            details={"existing_session_id": existing_session_id} if existing_session_id else {},
+        )
+
+
 class SessionNotActiveError(SAMSException):
     def __init__(self, session_id: str, current_status: str):
         super().__init__(
@@ -93,3 +103,4 @@ class RecordNotFoundError(SAMSException):
             message=f"Attendance record '{record_id}' was not found.",
             details={"record_id": record_id},
         )
+

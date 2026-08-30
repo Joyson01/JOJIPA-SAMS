@@ -9,6 +9,7 @@ from backend.app.core.exceptions import (
     RecordNotFoundError,
     SAMSException,
     SessionAlreadyExistsError,
+    SessionConflictError,
     SessionNotActiveError,
     SessionNotFoundError,
     StudentNotFoundError,
@@ -80,15 +81,24 @@ class AttendanceService:
                         AttendanceSession.start_time < session_in.end_time,
                         AttendanceSession.end_time >= session_in.end_time,
                     ),
+                    and_(
+                        AttendanceSession.start_time >= session_in.start_time,
+                        AttendanceSession.end_time <= session_in.end_time,
+                    ),
                 ),
             )
         )
         conflicts = (await db.execute(existing_conflict_q)).scalars().all()
         if conflicts:
-            logger.warning(f"Session conflict detected for class {class_name} with session {conflicts[0].session_code}")
+            logger.warning(f"Session conflict detected for class {class_name} with existing session {conflicts[0].session_code}")
+            raise SessionConflictError(
+                f"An attendance session already exists for {class_name} at this time slot on {session_in.scheduled_date or date.today()}.",
+                existing_session_id=conflicts[0].id,
+            )
 
         session = AttendanceSession(
             session_code=session_code,
+            timetable_entry_id=session_in.timetable_entry_id,
             subject_id=session_in.subject_id,
             class_id=session_in.class_id,
             class_name=class_name,
@@ -144,6 +154,7 @@ class AttendanceService:
         return SessionResponse(
             id=session.id,
             session_code=session.session_code,
+            timetable_entry_id=session.timetable_entry_id,
             subject_id=session.subject_id,
             class_id=session.class_id,
             class_name=session.class_name,

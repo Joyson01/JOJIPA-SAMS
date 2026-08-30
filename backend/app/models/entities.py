@@ -159,6 +159,24 @@ class ClassSection(Base):
     # Relationships
     class_subjects = relationship("ClassSubject", back_populates="class_section", cascade="all, delete-orphan")
     timetable_entries = relationship("TimetableEntry", back_populates="class_section", cascade="all, delete-orphan")
+    batches = relationship("Batch", back_populates="class_section", cascade="all, delete-orphan")
+
+
+class Batch(Base):
+    __tablename__ = "batches"
+
+    id: Mapped[str] = mapped_column(GUID, primary_key=True, default=generate_uuid)
+    class_id: Mapped[str] = mapped_column(GUID, ForeignKey("classes.id", ondelete="CASCADE"), index=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(32), index=True, nullable=False)  # e.g. "B1", "B2"
+    description: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("class_id", "name", name="uq_class_batch_name"),
+    )
+
+    class_section = relationship("ClassSection", back_populates="batches")
 
 
 class ClassSubject(Base):
@@ -183,6 +201,7 @@ class TimetableEntry(Base):
     id: Mapped[str] = mapped_column(GUID, primary_key=True, default=generate_uuid)
     class_id: Mapped[str] = mapped_column(GUID, ForeignKey("classes.id", ondelete="CASCADE"), index=True, nullable=False)
     subject_id: Mapped[Optional[str]] = mapped_column(GUID, ForeignKey("subjects.id", ondelete="SET NULL"), index=True, nullable=True)
+    batch_id: Mapped[Optional[str]] = mapped_column(GUID, ForeignKey("batches.id", ondelete="SET NULL"), nullable=True)
     day_of_week: Mapped[str] = mapped_column(String(16), index=True, nullable=False)  # Monday, Tuesday, Wednesday, Thursday, Friday
     start_time: Mapped[str] = mapped_column(String(16), nullable=False)  # e.g. "09:00", "10:00"
     end_time: Mapped[str] = mapped_column(String(16), nullable=False)    # e.g. "10:00", "11:00"
@@ -197,6 +216,7 @@ class TimetableEntry(Base):
 
     class_section = relationship("ClassSection", back_populates="timetable_entries")
     subject = relationship("Subject")
+    batch_entity = relationship("Batch")
 
 
 class AttendanceSession(Base):
@@ -204,6 +224,7 @@ class AttendanceSession(Base):
 
     id: Mapped[str] = mapped_column(GUID, primary_key=True, default=generate_uuid)
     session_code: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    timetable_entry_id: Mapped[Optional[str]] = mapped_column(GUID, ForeignKey("timetable_entries.id", ondelete="SET NULL"), nullable=True)
     subject_id: Mapped[Optional[str]] = mapped_column(GUID, ForeignKey("subjects.id", ondelete="SET NULL"), index=True, nullable=True)
     class_id: Mapped[Optional[str]] = mapped_column(GUID, ForeignKey("classes.id", ondelete="SET NULL"), index=True, nullable=True)
     class_name: Mapped[str] = mapped_column(String(32), index=True, nullable=False)

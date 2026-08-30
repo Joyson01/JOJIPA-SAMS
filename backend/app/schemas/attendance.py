@@ -6,10 +6,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 class SessionCreate(BaseModel):
     session_code: Optional[str] = Field(None, description="Unique session code (auto-generated if empty)")
+    timetable_entry_id: Optional[str] = Field(None, description="UUID of the originating timetable slot if scheduled from timetable")
     subject_id: Optional[str] = Field(None, description="UUID of the academic Subject")
     class_id: Optional[str] = Field(None, description="UUID of the academic ClassSection")
-    class_name: str = Field(..., min_length=1, max_length=64, description="Target class/batch (e.g. CSE-4A)")
-    subject: str = Field(..., min_length=1, max_length=128, description="Course or subject name")
+    class_name: str = Field(..., min_length=1, max_length=64, description="Target class/batch (e.g. TE-B)")
+    subject: str = Field(..., min_length=1, max_length=128, description="Course or subject name / timetable label")
     room: str = Field(..., min_length=1, max_length=32, description="Classroom or hall number")
     scheduled_date: Optional[date] = Field(default_factory=date.today)
     start_time: time
@@ -28,6 +29,7 @@ class SessionCreate(BaseModel):
 
 
 class SessionUpdate(BaseModel):
+    timetable_entry_id: Optional[str] = None
     subject_id: Optional[str] = None
     class_id: Optional[str] = None
     subject: Optional[str] = None
@@ -47,6 +49,7 @@ class SessionResponse(BaseModel):
 
     id: str
     session_code: str
+    timetable_entry_id: Optional[str] = None
     subject_id: Optional[str] = None
     class_id: Optional[str] = None
     class_name: str

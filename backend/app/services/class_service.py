@@ -1,16 +1,21 @@
+from datetime import date, time
 from typing import List, Optional
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.exceptions import SAMSException
 from backend.app.core.logging import logger
-from backend.app.models.entities import ClassSection, ClassSubject, Student, Subject, TimetableEntry
+from backend.app.models.entities import AttendanceSession, ClassSection, ClassSubject, Student, Subject, TimetableEntry
 from backend.app.schemas.class_section import (
     ClassSectionCreate,
     ClassSectionResponse,
     ClassSectionUpdate,
 )
-from backend.app.schemas.timetable import TimetableEntryCreate, TimetableEntryResponse
+from backend.app.schemas.timetable import (
+    TimetableEntryCreate,
+    TimetableEntryResponse,
+    TimetableEntryUpdate,
+)
 
 
 class ClassNotFoundError(SAMSException):
@@ -150,14 +155,32 @@ class ClassService:
         return True
 
     @classmethod
-    async def list_timetable_entries(cls, db: AsyncSession, class_id: Optional[str] = None, day_of_week: Optional[str] = None) -> List[TimetableEntryResponse]:
-        """Lists timetable schedule entries for a class or day."""
+    async def list_timetable_entries(
+        cls,
+        db: AsyncSession,
+        class_id: Optional[str] = None,
+        day_of_week: Optional[str] = None,
+        scheduled_date: Optional[date] = None,
+    ) -> List[TimetableEntryResponse]:
+        """Lists timetable schedule entries for a class, day, or specific calendar date."""
+        target_day = day_of_week
+
+        # Date awareness & Effective Date Check
+        if scheduled_date:
+            # Check effective date threshold (15/06/2026 -> 2026-06-15)
+            if scheduled_date < date(2026, 6, 15):
+                logger.info(f"Requested date {scheduled_date} is prior to effective curriculum date 2026-06-15. Returning empty schedule.")
+                return []
+
+            if not target_day:
+                target_day = scheduled_date.strftime("%A")
+
         query = select(TimetableEntry)
         filters = []
         if class_id:
             filters.append(TimetableEntry.class_id == class_id)
-        if day_of_week:
-            filters.append(TimetableEntry.day_of_week.ilike(day_of_week))
+        if target_day:
+            filters.append(TimetableEntry.day_of_week.ilike(target_day))
 
         if filters:
             query = query.where(and_(*filters))
@@ -182,6 +205,25 @@ class ClassService:
                     subj_code = s.code
                     subj_name = s.name
 
+            has_session = False
+            existing_session_id = None
+
+            if scheduled_date and class_name:
+                # Check for existing scheduled/active session on this date
+                sq = select(AttendanceSession).where(
+                    and_(
+                        AttendanceSession.class_name == class_name,
+                        AttendanceSession.scheduled_date == scheduled_date,
+                        AttendanceSession.status.in_(["SCHEDULED", "ACTIVE"]),
+                        AttendanceSession.start_time <= time.fromisoformat(e.start_time if len(e.start_time) == 5 else f"0{e.start_time}"),
+                        AttendanceSession.end_time >= time.fromisoformat(e.end_time if len(e.end_time) == 5 else f"0{e.end_time}"),
+                    )
+                )
+                existing_sess = (await db.execute(sq)).scalars().first()
+                if existing_sess:
+                    has_session = True
+                    existing_session_id = existing_sess.id
+
             responses.append(
                 TimetableEntryResponse(
                     id=e.id,
@@ -190,6 +232,8 @@ class ClassService:
                     subject_id=e.subject_id,
                     subject_code=subj_code,
                     subject_name=subj_name,
+                    is_mapped=bool(e.subject_id),
+                    batch_id=e.batch_id,
                     day_of_week=e.day_of_week,
                     start_time=e.start_time,
                     end_time=e.end_time,
@@ -199,6 +243,8 @@ class ClassService:
                     room=e.room,
                     effective_from=e.effective_from,
                     status=e.status,
+                    has_existing_session=has_session,
+                    existing_session_id=existing_session_id,
                     created_at=e.created_at,
                     updated_at=e.updated_at,
                 )
@@ -211,6 +257,7 @@ class ClassService:
         entry = TimetableEntry(
             class_id=entry_in.class_id,
             subject_id=entry_in.subject_id,
+            batch_id=entry_in.batch_id,
             day_of_week=entry_in.day_of_week,
             start_time=entry_in.start_time,
             end_time=entry_in.end_time,
@@ -225,7 +272,42 @@ class ClassService:
         await db.commit()
         await db.refresh(entry)
 
-        return (await cls.list_timetable_entries(db, class_id=entry.class_id, day_of_week=entry.day_of_week))[0]
+        res = await cls.list_timetable_entries(db, class_id=entry.class_id, day_of_week=entry.day_of_week)
+        for r in res:
+            if r.id == entry.id:
+                return r
+        return res[0]
+
+    @classmethod
+    async def update_timetable_entry(cls, db: AsyncSession, entry_id: str, update_in: TimetableEntryUpdate) -> TimetableEntryResponse:
+        """Updates a timetable entry (e.g. mapping to a Subject, changing room or batch)."""
+        entry = await db.get(TimetableEntry, entry_id)
+        if not entry:
+            raise SAMSException(status_code=404, error_code="TIMETABLE_ENTRY_NOT_FOUND", message=f"Timetable slot '{entry_id}' not found.")
+
+        update_dict = update_in.model_dump(exclude_unset=True)
+        for field, value in update_dict.items():
+            if field in ["entry_type", "status"] and value:
+                value = value.upper()
+            setattr(entry, field, value)
+
+        await db.commit()
+        await db.refresh(entry)
+        res = await cls.list_timetable_entries(db, class_id=entry.class_id, day_of_week=entry.day_of_week)
+        for r in res:
+            if r.id == entry.id:
+                return r
+        return res[0]
+
+    @classmethod
+    async def delete_timetable_entry(cls, db: AsyncSession, entry_id: str) -> bool:
+        """Deletes a timetable schedule slot."""
+        entry = await db.get(TimetableEntry, entry_id)
+        if not entry:
+            raise SAMSException(status_code=404, error_code="TIMETABLE_ENTRY_NOT_FOUND", message=f"Timetable slot '{entry_id}' not found.")
+        await db.delete(entry)
+        await db.commit()
+        return True
 
     @staticmethod
     async def _serialize_class(db: AsyncSession, class_obj: ClassSection) -> ClassSectionResponse:

@@ -151,6 +151,8 @@ async def init_db_schema() -> None:
             ("subjects", "theory_credits", "INTEGER DEFAULT 0"),
             ("subjects", "tutorial_credits", "INTEGER DEFAULT 0"),
             ("subjects", "practical_credits", "INTEGER DEFAULT 0"),
+            ("timetable_entries", "batch_id", "VARCHAR(36)"),
+            ("attendance_sessions", "timetable_entry_id", "VARCHAR(36)"),
         ]
 
         for table, col, col_type in alter_statements:

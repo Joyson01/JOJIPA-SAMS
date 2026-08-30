@@ -76,6 +76,7 @@ export interface TimetableEntry {
   subject_id?: string;
   subject_code?: string;
   subject_name?: string;
+  is_mapped?: boolean;
   day_of_week: string;
   start_time: string;
   end_time: string;
@@ -85,4 +86,7 @@ export interface TimetableEntry {
   room?: string;
   effective_from?: string;
   status: string;
+  has_existing_session?: boolean;
+  existing_session_id?: string | null;
 }
+

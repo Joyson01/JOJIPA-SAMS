@@ -94,12 +94,19 @@ export const LiveDashboardPage: React.FC<LiveDashboardProps> = ({ onNavigate }) 
       const active = sessionList.find((s) => s.status === 'ACTIVE');
       if (active) {
         setSelectedSessionId(active.id);
+        if (active.camera_id && camList.some((c) => c.id === active.camera_id)) {
+          setSelectedCameraId(active.camera_id);
+        } else if (camList.length > 0) {
+          setSelectedCameraId((prev) => (prev && camList.some((c) => c.id === prev) ? prev : camList[0].id));
+        }
       } else if (sessionList.length > 0) {
         setSelectedSessionId(sessionList[0].id);
-      }
-
-      // Pick best camera (e.g. matching room or first camera)
-      if (camList.length > 0) {
+        if (sessionList[0].camera_id && camList.some((c) => c.id === sessionList[0].camera_id)) {
+          setSelectedCameraId(sessionList[0].camera_id);
+        } else if (camList.length > 0) {
+          setSelectedCameraId((prev) => (prev && camList.some((c) => c.id === prev) ? prev : camList[0].id));
+        }
+      } else if (camList.length > 0) {
         setSelectedCameraId((prev) => (prev && camList.some((c) => c.id === prev) ? prev : camList[0].id));
       } else {
         setSelectedCameraId('');
@@ -111,6 +118,15 @@ export const LiveDashboardPage: React.FC<LiveDashboardProps> = ({ onNavigate }) 
       setLoadingSessions(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (selectedSessionId && sessions.length > 0) {
+      const sess = sessions.find((s) => s.id === selectedSessionId);
+      if (sess && sess.camera_id && cameras.some((c) => c.id === sess.camera_id)) {
+        setSelectedCameraId(sess.camera_id);
+      }
+    }
+  }, [selectedSessionId, sessions, cameras]);
 
   useEffect(() => {
     loadResources();

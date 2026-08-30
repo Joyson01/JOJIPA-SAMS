@@ -75,23 +75,37 @@ export const deleteClass = async (id: string): Promise<void> => {
 
 export const fetchClassTimetable = async (
   classId: string,
-  dayOfWeek?: string
+  dayOfWeek?: string,
+  scheduledDate?: string
 ): Promise<TimetableEntry[]> => {
   const response = await apiClient.get<TimetableEntry[]>(`/classes/${classId}/timetable`, {
-    params: { day_of_week: dayOfWeek || undefined },
+    params: {
+      day_of_week: dayOfWeek || undefined,
+      scheduled_date: scheduledDate || undefined,
+    },
   });
   return response.data;
 };
 
 export const fetchAllTimetableEntries = async (
   classId?: string,
-  dayOfWeek?: string
+  dayOfWeek?: string,
+  scheduledDate?: string
 ): Promise<TimetableEntry[]> => {
   const response = await apiClient.get<TimetableEntry[]>('/classes/timetable/entries', {
     params: {
       class_id: classId || undefined,
       day_of_week: dayOfWeek || undefined,
+      scheduled_date: scheduledDate || undefined,
     },
   });
+  return response.data;
+};
+
+export const updateTimetableEntry = async (
+  entryId: string,
+  payload: Partial<TimetableEntry>
+): Promise<TimetableEntry> => {
+  const response = await apiClient.put<TimetableEntry>(`/classes/timetable/entries/${entryId}`, payload);
   return response.data;
 };

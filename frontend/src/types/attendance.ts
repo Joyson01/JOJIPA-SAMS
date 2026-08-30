@@ -1,6 +1,7 @@
 export interface AttendanceSession {
   id: string;
   session_code: string;
+  timetable_entry_id?: string | null;
   subject_id?: string | null;
   class_id?: string | null;
   class_name: string;
@@ -26,6 +27,7 @@ export interface AttendanceSession {
 
 export interface SessionCreatePayload {
   session_code?: string;
+  timetable_entry_id?: string;
   subject_id?: string;
   class_id?: string;
   class_name: string;
