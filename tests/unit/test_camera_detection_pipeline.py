@@ -21,8 +21,8 @@ def test_detector_initialization_and_model_loading(detector):
 
 def test_detector_one_face_image(detector):
     """Verifies that single frontal face returns exactly one bounding box."""
-    img = cv2.imread("src/Test/pankaj.jpg")
-    assert img is not None, "Failed to load src/Test/pankaj.jpg"
+    img = cv2.imread("tests/fixtures/pankaj.jpg")
+    assert img is not None, "Failed to load tests/fixtures/pankaj.jpg"
     faces = detector.detect(img)
     assert len(faces) == 1
     assert faces[0].det_score >= 0.70
@@ -31,7 +31,7 @@ def test_detector_one_face_image(detector):
 
 def test_detector_multi_face_image(detector):
     """Verifies that multiple faces are accurately detected simultaneously."""
-    img = cv2.imread("src/Test/test_grp.jpg")
+    img = cv2.imread("tests/fixtures/test_grp.jpg")
     if img is not None:
         faces = detector.detect(img)
         assert len(faces) > 1, f"Expected multiple faces, found {len(faces)}"
@@ -55,7 +55,7 @@ async def test_api_detect_endpoint_valid_image():
     """Tests POST /api/v1/recognition/detect with real image upload."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        with open("src/Test/pankaj.jpg", "rb") as f:
+        with open("tests/fixtures/pankaj.jpg", "rb") as f:
             res = await client.post(
                 "/api/v1/recognition/detect",
                 files={"file": ("frame.jpg", f, "image/jpeg")},
@@ -74,7 +74,7 @@ async def test_api_debug_detect_endpoint():
     """Tests POST /api/v1/recognition/debug/detect development endpoint."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        with open("src/Test/pankaj.jpg", "rb") as f:
+        with open("tests/fixtures/pankaj.jpg", "rb") as f:
             res = await client.post(
                 "/api/v1/recognition/debug/detect",
                 files={"file": ("frame.jpg", f, "image/jpeg")},

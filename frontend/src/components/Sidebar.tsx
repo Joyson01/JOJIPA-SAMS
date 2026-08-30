@@ -32,13 +32,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
   return (
     <aside className="w-64 bg-white border-r border-slate-200 flex flex-col shrink-0 min-h-screen">
       {/* Brand Header */}
-      <div className="h-16 flex items-center gap-3 px-6 border-b border-slate-200">
-        <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-base shadow-sm">
-          S
+      <div className="h-16 flex items-center gap-3 px-5 border-b border-slate-200">
+        <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-sm shadow-sm shrink-0">
+          JS
         </div>
-        <div>
-          <h1 className="font-bold text-base text-slate-900 leading-none">SAMS</h1>
-          <p className="text-[11px] text-slate-500 font-medium mt-0.5">Smart Attendance</p>
+        <div className="min-w-0">
+          <h1 className="font-bold text-sm text-slate-900 leading-none truncate">JOJIPA-SAMS</h1>
+          <p className="text-[10px] text-slate-500 font-medium mt-0.5 truncate">Smart Attendance</p>
         </div>
       </div>
 

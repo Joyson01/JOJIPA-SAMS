@@ -1,168 +1,268 @@
-# SAMS — Smart Attendance Management System
-
-A modern, automated **AI Face Attendance Management System** designed for academic institutions. SAMS integrates computer vision pipelines (SCRFD face detection, ArcFace deep embedding extraction, 3D pose validation, texture liveness analysis, and ByteTrack continuous multi-face tracking) with a high-performance FastAPI backend, relational persistence, and a clean React + TypeScript management interface.
-
----
-
-## Key Features
-
-1. **Academic Hierarchy & Subject Management**
-   - Manage real academic subjects (e.g. `CS401 Computer Networks`) and class sections (e.g. `CSE-4A`).
-   - Prevent duplicate subject codes and classes across frontend, API, and database layers.
-   - Soft-deactivation of subjects with historical sessions to preserve records.
-
-2. **Consolidated Real-Time Dashboard**
-   - **Top 5 Summary Metrics:** Total Students, Face Enrolled, Present Today, Absent Today, and Attendance Rate.
-   - **Active Session Banner:** Live status indicator, elapsed time, camera source, and real-time roster counter.
-   - **Today's Attendance Sessions:** Real-time present and absentee counters per class session.
-   - **Live Camera Health:** Dynamic health states (`STREAMING`, `CONNECTED`, `NO_FRAME`, `OFFLINE`).
-   - **Attendance Trends:** 14-day historical attendance progression.
-   - **Recent Activity Feed:** Chronological log of attendance events, identity verifications, and audit trails.
-   - **Needs Attention:** Actionable exception alerts for pending face enrollments, offline cameras, and low confidence matches.
-
-3. **Multi-Angle Face Enrollment**
-   - Real-time browser webcam capture with visual face landmark guidance.
-   - Automatic quality, sharpness, illumination, and multi-pose (Front, Left, Right, Tilt) validation before embedding storage.
-
-4. **Live Attendance & Continuous Presence Tracking**
-   - Multi-face simultaneous detection in active classrooms.
-   - **Mark Once, Track Continuously:** Marks attendance ONCE per student per session, transitioning into persistent presence tracking (`PRESENT_AND_VISIBLE`, `TEMPORARILY_NOT_VISIBLE`, `LEFT`, `RETURNED`).
-   - Configurable session late threshold (e.g. 10 minutes).
-   - Auto-population of absentees from enrolled class rosters upon session closure.
-   - Manual override with approved excuse tracking and audit logging.
-
-5. **Camera Management & Mobile Pairing**
-   - Connect webcams, RTSP streams, and mobile smartphone cameras.
-   - Pair any mobile phone camera in seconds via QR code pairing without authentication friction.
-   - Hardware diagnostics and live stream test previews.
+# JOJIPA-SAMS
+## Smart Attendance Management System
 
 ---
 
-## System Requirements
+## 1. Overview
+**JOJIPA-SAMS** is an automated, AI-powered Face Attendance Management System engineered for educational institutions, colleges, and university lecture halls. It replaces error-prone manual roll calls with continuous multi-face recognition, passive liveness verification, automated absent reconciliation, and real-time attendance tracking.
 
+## 2. Problem
+Higher education institutions face persistent challenges in attendance tracking:
+- **Lost Instructional Time:** Manual roll calls consume 10–20% of lecture time in halls of 40–120 students.
+- **Proxy Attendance (Buddy Punching):** Sign-in sheets and proximity RFID cards are easily shared.
+- **Delayed Intervention:** Delayed attendance compilation prevents timely counseling for at-risk students.
+- **Hardware Friction:** Fixed biometric door scanners cause hallway congestion and cannot track classroom presence dynamically.
+
+## 3. Solution
+JOJIPA-SAMS provides an end-to-end intelligent visual attendance platform:
+- Scans active classrooms in real-time using standard webcams, wireless smartphone cameras, or RTSP streams.
+- **Separates Recognition from Attendance:** Performs continuous video recognition and presence tracking while guaranteeing exactly **ONE** attendance record per student per session.
+- Automatically marks unrecorded students as `ABSENT` upon session finalization.
+- Provides immediate auditability with faculty manual overrides and institutional analytics.
+
+## 4. Features
+- **Consolidated Dashboard:** 5 KPI summary cards (Students, Enrolled, Present Today, Absent Today, Rate), Active Live Session banner, Today's sessions table, Camera stream health, 14-day trends, Recent activity logs, and Actionable exception alerts.
+- **Academic Hierarchy:** Dedicated management for Subjects (`CS401 Computer Networks`) and Class Sections (`CSE-4A`) with duplicate prevention.
+- **Multi-Pose Face Enrollment:** 5-angle biometric capture (Front, Left 15°, Right 15°, Tilt Up, Tilt Down) with real-time pose and Laplacian quality validation.
+- **Continuous Classroom Presence Tracking:** Real-time multi-face bounding boxes with status pills (`KNOWN`, `UNCERTAIN`, `UNKNOWN`) and dynamic presence states (`VISIBLE`, `TEMPORARILY_NOT_VISIBLE`, `LEFT`, `RETURNED`).
+- **Flexible Camera Integration:** Support for USB Webcams, RTSP Security Streams, and Smartphone Cameras via zero-friction QR code pairing.
+- **Institutional Analytics:** Defaulter identification (<75% attendance threshold) and RFC-4180 CSV report export.
+
+## 5. Architecture
+```
+[ Mobile / Smartphone ]       [ Web Browser (React + TS) ]       [ IP / RTSP Camera ]
+         │                                  │                               │
+         ▼                                  ▼                               ▼
+┌───────────────────────────────────────────────────────────────────────────────────┐
+│                             Vite Dev / Nginx Gateway                              │
+│                               (HTTPS / WSS Reverse Proxy)                         │
+└─────────────────────────────────────────┬─────────────────────────────────────────┘
+                                          │
+                                          ▼
+┌───────────────────────────────────────────────────────────────────────────────────┐
+│                           JOJIPA-SAMS FastAPI Backend                             │
+│                                                                                   │
+│  ┌───────────────────────┐ ┌──────────────────────┐ ┌──────────────────────────┐  │
+│  │   Auth & Audit APIs   │ │  Dashboard & Reports │ │ Attendance & Presence    │  │
+│  └───────────────────────┘ └──────────────────────┘ └──────────────────────────┘  │
+│  ┌───────────────────────┐ ┌──────────────────────┐ ┌──────────────────────────┐  │
+│  │  Subject & Class APIs │ │  Camera Streaming    │ │ Recognition & Matcher    │  │
+│  └───────────────────────┘ └──────────────────────┘ └──────────────────────────┘  │
+└─────────────────────────────────────────┬─────────────────────────────────────────┘
+                                          │
+                                          ▼
+┌───────────────────────────────────────────────────────────────────────────────────┐
+│                           AI / Computer Vision Pipeline                           │
+│                                                                                   │
+│   [ SCRFD 10G-KPS ] ──► [ Affine Aligner ] ──► [ ArcFace ResNet-50 (512-dim) ]    │
+│            │                                                    │                 │
+│            ▼                                                    ▼                 │
+│   [ Laplacian Liveness ] ─────────────────────────► [ Cosine Vector Matcher ]     │
+│            │                                                    │                 │
+│            ▼                                                    ▼                 │
+│   [ Kalman ByteTracker ] ─────────────────────────► [ Temporal Consensus Voting ] │
+└─────────────────────────────────────────┬─────────────────────────────────────────┘
+                                          │
+                                          ▼
+┌───────────────────────────────────────────────────────────────────────────────────┐
+│                              Data & Persistence Layer                             │
+│                                                                                   │
+│   [ SQLite (Dev Mode) ]  /  [ PostgreSQL 16 + pgvector ]  /  [ SQLAlchemy 2.0 ]   │
+└───────────────────────────────────────────────────────────────────────────────────┘
+```
+
+## 6. Technology Stack
+- **Frontend:** React 18, TypeScript, Tailwind CSS, Lucide Icons, Vite
+- **Backend:** FastAPI, Python 3.10+, Uvicorn, SQLAlchemy 2.0 (AsyncIO), Pydantic v2, PyJWT, Bcrypt
+- **Computer Vision & AI:** InsightFace, SCRFD-10G, ArcFace (ResNet-50), OpenCV, ONNX Runtime, ByteTrack
+- **Databases:** PostgreSQL 16 + pgvector (Production) / SQLite (aiosqlite for Local Dev)
+- **Containerization:** Docker, Docker Compose
+
+## 7. Requirements
 - **Operating System:** Linux / macOS / Windows (WSL2 recommended)
-- **Python:** Python 3.10+ (tested on Python 3.10 - 3.14)
-- **Node.js:** Node.js v18.0.0+
+- **Python:** Version 3.10 or higher
+- **Node.js:** Version 18.0.0 or higher
 - **Package Manager:** `pnpm` (or `npm`)
-- **Hardware:** Webcam or smartphone with camera support
+- **Camera:** Standard USB Webcam or Smartphone with browser camera support
 
----
-
-## Installation & Setup
-
-### 1. Clone the Repository
-
-```bash
-git clone <repository-url>
-cd "SAMS Mark-2"
+## 8. Project Structure
+```
+JOJIPA-SAMS/
+│
+├── backend/
+│   ├── app/
+│   │   ├── api/v1/          # REST route controllers
+│   │   ├── core/            # Config, security, logging, exceptions
+│   │   ├── database/        # Async SQLAlchemy session and base
+│   │   ├── models/          # Relational entities (Student, Subject, Session, etc.)
+│   │   ├── schemas/         # Pydantic v2 validation models
+│   │   └── services/        # Business logic (Attendance, Dashboard, AI, Camera)
+│   ├── alembic/             # Database migration scripts
+│   └── main.py              # Application entry point
+│
+├── ai_engine/
+│   ├── detection/           # SCRFD-10G ONNX face detector
+│   ├── alignment/           # 5-point affine transformation aligner
+│   ├── recognition/         # ArcFace ResNet-50 embedding generator & cosine matcher
+│   ├── tracking/            # ByteTrack multi-target Kalman filter
+│   ├── quality/             # Blur, illumination, and 3D head pose estimators
+│   └── liveness/            # Fourier texture & chromatic anti-spoofing
+│
+├── frontend/
+│   ├── src/
+│   │   ├── components/      # Reusable UI widgets (Header, Sidebar, Badges)
+│   │   ├── features/        # Feature modules (Attendance, Subjects, Cameras, etc.)
+│   │   ├── pages/           # Primary page views (DashboardOverview)
+│   │   ├── services/        # Axios API clients
+│   │   └── types/           # TypeScript interfaces
+│   ├── public/              # Static assets
+│   └── package.json         # Frontend dependencies & build scripts
+│
+├── scripts/
+│   └── seed_demo.py         # Optional manual database seeder
+├── tests/
+│   ├── unit/                # 28 isolated mathematical & service unit tests
+│   └── integration/         # 10 comprehensive REST API integration tests
+├── .env.example             # Documented environment template
+├── docker-compose.yml       # Production multi-container composition
+├── README.md                # System documentation
+└── PROJECT_REPORT.md        # 46-section technical engineering report
 ```
 
-### 2. Backend Setup (FastAPI & AI Engine)
-
-1. Create and activate a Python virtual environment:
-
+## 9. Installation
 ```bash
+# 1. Clone Repository
+git clone https://github.com/Joyson01/SAMS.git
+cd SAMS
+
+# 2. Setup Python Virtual Environment
 python3 -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-```
-
-2. Install Python dependencies:
-
-```bash
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install --upgrade pip
 pip install -r requirements.txt
-```
 
-3. Configure Environment Variables:
-   Create a `.env` file in the root directory (or use default configuration):
-
-```env
-APP_NAME="SAMS"
-DEBUG=true
-PORT=8000
-DATABASE_URL="sqlite+aiosqlite:///./data/sams_dev.db"
-JWT_SECRET_KEY="sams-enterprise-production-secret-key-2026"
-CORS_ORIGINS=["http://localhost:5173","https://localhost:5173"]
-```
-
-### 3. Frontend Setup (React + Vite + TypeScript)
-
-1. Navigate to the `frontend` directory and install dependencies:
-
-```bash
+# 3. Setup Frontend Dependencies
 cd frontend
 corepack enable
 pnpm install
 cd ..
 ```
 
----
-
-## Running the Application
-
-### 1. Start the FastAPI Backend Server
-
+## 10. Environment Setup
+Create a `.env` file in the root directory from the provided template:
 ```bash
-# From workspace root with .venv activated:
-python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
+cp .env.example .env
+```
+Default parameters in `.env`:
+```env
+APP_NAME="JOJIPA-SAMS"
+DEBUG=true
+PORT=8000
+DATABASE_URL="sqlite+aiosqlite:///./data/sams_dev.db"
+SECRET_KEY="jojipa-sams-super-secret-jwt-key-change-in-production-2026"
+CORS_ORIGINS=["http://localhost:5173","https://localhost:5173"]
 ```
 
+## 11. Database Setup
+Development mode uses SQLite with automated table initialization on startup.
+For production PostgreSQL with pgvector:
+```bash
+docker-compose up -d postgres
+alembic -c backend/alembic.ini upgrade head
+```
+*(Optional: Run `python -m scripts.seed_demo` if you wish to populate initial demo data).*
+
+## 12. Running Backend
+```bash
+.venv/bin/python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
+```
 - API Server: `http://localhost:8000`
-- Interactive OpenAPI Docs: `http://localhost:8000/docs`
-- Health Endpoint: `http://localhost:8000/health`
+- Interactive Swagger Documentation: `http://localhost:8000/docs`
+- Health Liveness Probe: `http://localhost:8000/health`
 
-### 2. Start the Frontend Development Server
-
+## 13. Running Frontend
 ```bash
-# In a new terminal tab:
 cd frontend
-pnpm run dev --host 0.0.0.0 --port 5173
+corepack pnpm run dev --host 0.0.0.0 --port 5173
 ```
+- Desktop Administrative Web App: `https://localhost:5173`
+- Wireless Mobile Camera Station: `https://<YOUR_LOCAL_IP>:5173/mobile-camera`
 
-- Admin Web Dashboard: `http://localhost:5173` (or `https://localhost:5173`)
-- Mobile Camera Station: `https://<YOUR_LOCAL_IP>:5173/mobile-camera`
+## 14. Face Enrollment
+1. Navigate to **Students** and click **Add Student** to create a profile (Roll Number, First/Last Name, Email, Department, Class).
+2. Click **Enroll Face** next to the student profile.
+3. Allow browser webcam access.
+4. Follow the on-screen landmark guide to capture 5 distinct poses: Frontal, Left 15°, Right 15°, Tilt Up, and Tilt Down.
+5. The system extracts 512-dimensional ArcFace embeddings and verifies sample quality before marking the student as `ENROLLED`.
 
----
+## 15. Live Attendance
+1. In the sidebar, select **Live Attendance**.
+2. Select an active attendance session and camera feed.
+3. Click **Start Scanning**.
+4. Real-time bounding boxes display student identities, match confidence, and presence status.
 
-## Running Tests
+## 16. Camera Setup
+Navigate to **Cameras** in the sidebar. SAMS supports:
+- **Webcam:** Native USB / integrated cameras.
+- **RTSP Streams:** IP cameras via RTSP URL (`rtsp://username:password@ip:port/stream`).
+- **Video Files:** Pre-recorded MP4/AVI videos for testing and batch auditing.
 
-Run the complete test suite (Unit, Integration, and AI Pipeline tests):
+## 17. Mobile Camera Setup (Phone as a Camera)
+1. Connect your computer and smartphone to the **same Wi-Fi network**.
+2. Open `https://<YOUR_COMPUTER_IP>:5173` on your desktop.
+3. In **Cameras**, click **Add Mobile Camera** and select **Generate QR Code**.
+4. Scan the QR code with your smartphone.
+5. On the phone browser, accept the camera permission prompt and tap **Start Camera**.
+6. Select this smartphone in **Live Attendance** to begin classroom scanning.
 
+## 18. Subject and Class Setup
+1. In **Subjects**, create academic subjects (e.g. Code: `CS401`, Name: `Computer Networks`, Department: `Computer Science`, Credits: `4`).
+2. In the same view, create Class Sections (e.g. Name: `CSE-4A`, Department: `Computer Science`, Year: `4`, Semester: `4`, Section: `A`).
+3. Sessions and students will now bind directly to these validated entities.
+
+## 19. Attendance Workflow
+- **First Verified Sighting:** When a student is verified, the system marks them `PRESENT` (or `LATE` if arrival exceeds late grace period).
+- **Subsequent Sightings:** Continuous video recognition updates the in-memory presence manager (`PRESENT_AND_VISIBLE`, `TEMPORARILY_NOT_VISIBLE`, `LEFT`, `RETURNED`) without writing redundant database rows.
+- **Session Closure:** When the faculty ends the session, enrolled students who were not detected are automatically marked `ABSENT`.
+
+## 20. Reports & Analytics
+- Navigate to **Reports** to view real-time department analytics, session rosters, and average attendance rates.
+- Isolate students below the $75.0\%$ attendance threshold in the **Defaulters List**.
+- Click **Export CSV** to download RFC-4180 compliant attendance spreadsheets.
+
+## 21. Testing
+Run the complete automated test suite:
 ```bash
-# Run all pytest tests (86 tests)
+# 1. Run all 86 unit and integration tests
 pytest -v
 
-# Run unit tests
-pytest tests/unit/ -v
-
-# Run integration API tests
-pytest tests/integration/ -v
-
-# Run master end-to-end verification script
+# 2. Run master 18-step end-to-end acceptance script
 python scratch/test_complete_sams_e2e.py
 
-# Run frontend build verification
+# 3. Build frontend bundle
 cd frontend && pnpm run build
 ```
 
----
+## 22. Troubleshooting
+- **Black Video Preview / Camera Denied:** Ensure you are accessing the application via `https://` (or `localhost`). Modern browsers block camera access on unencrypted `http://` IP connections.
+- **Mobile Camera Cannot Connect:** Verify your smartphone is on the same local Wi-Fi subnet and firewall port 5173/8000 is open.
+- **Low Match Confidence:** Ensure adequate classroom illumination and verify that the student completed multi-pose enrollment.
 
-## Application Modules & Routes
+## 23. Known Limitations
+- **Extreme Yaw/Pitch Head Angles ($> 35^\circ$):** Faces turned away from the camera are discarded by the quality filter.
+- **Low Illumination ($< 20$ lux):** Dimly lit rooms may trigger blur/contrast rejections.
+- **Network Latency:** Weak Wi-Fi signals may reduce mobile video streaming frame rates from 15 FPS to 3–5 FPS.
 
-| Module                | Route / Navigation | Description                                                                                                             |
-| --------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------- |
-| **Dashboard**         | `/`                | 5 Top KPI cards, Active live session banner, Today's sessions, Camera health, Attendance trends, and Recent activities. |
-| **Students**          | `students`         | Student registration, batch filters, roll number search, profile management.                                            |
-| **Academic Setup**    | `subjects`         | Subjects CRUD (code, credits, semester, department) & Class Sections CRUD (`CSE-4A`).                                   |
-| **Face Enrollment**   | `enrollment`       | Multi-pose face capture with live AI quality feedback & 512-dim ArcFace embedding generation.                           |
-| **Live Attendance**   | `live`             | Real-time classroom attendance scanning with continuous presence tracking.                                              |
-| **Attendance Roster** | `attendance`       | Session management, roster attendance tables, manual overrides, and excuse audits.                                      |
-| **Cameras**           | `cameras`          | Camera device management, dynamic stream health status, and mobile QR pairing.                                          |
-| **Reports**           | `reports`          | Institutional attendance analytics, defaulters list (<75%), and CSV export.                                             |
-| **Mobile Camera**     | `/mobile-camera`   | Standalone mobile camera interface for wireless smartphone streaming.                                                   |
+## 24. Future Scope
+- CUDA / TensorRT GPU execution providers for high-density lecture halls ($> 300$ students).
+- Active challenge-response 3D depth anti-spoofing prompts for self-service portals.
+- Automated SMS and Email webhook notifications for parent/guardian attendance alerts.
 
----
+## 25. Security & Privacy
+- **Biometric Protection:** Raw facial images are never stored as biometric credentials. Only mathematical vector arrays ($\mathbb{R}^{512}$) are persisted.
+- **Password Hashing:** Passwords use salted `bcrypt`.
+- **Stateless Tokens:** JWT HS256 tokens with configurable expiration claims.
+- **Audit Trails:** Faculty manual overrides and profile changes are immutably logged in `audit_logs`.
 
-## License
-
-Academic and Educational Use. Developed for Smart Attendance Management.
+## 26. License
+Academic & Educational Use. Developed for JOJIPA-SAMS — Smart Attendance Management System.

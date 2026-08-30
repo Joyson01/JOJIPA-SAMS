@@ -52,8 +52,8 @@ scratch/test_faces/
 *.jpg
 *.jpeg
 *.png
-!src/Test/*.jpg
-!src/Test/*.png
+!tests/fixtures/*.jpg
+!tests/fixtures/*.png
 !.gitkeep
 
 # Operating System Files

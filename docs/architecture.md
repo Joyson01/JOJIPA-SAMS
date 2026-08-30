@@ -1,14 +1,14 @@
-# AI Face Attendance Management System — System Architecture
+# JOJIPA-SAMS — System Architecture
+## Smart Attendance Management System
 
 **Document Version:** 1.0.0  
-**Phase:** Phase 0 (Architecture & System Design)  
-**Status:** Approved Architectural Blueprint
+**Status:** Approved Architectural Specification
 
 ---
 
 ## 1. Executive Summary & Core Design Philosophy
 
-The **AI Face Attendance Management System (SAMS Mark-2)** is an enterprise-grade biometric attendance and automated identity verification platform designed for academic classrooms, lecture halls, campus gates, and corporate environments.
+The **JOJIPA-SAMS (Smart Attendance Management System)** is an enterprise-grade biometric attendance and automated identity verification platform designed for academic classrooms, lecture halls, campus gates, and corporate environments.
 
 ### Core Architectural Principle
 
