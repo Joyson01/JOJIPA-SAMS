@@ -23,60 +23,63 @@ from backend.app.database.session import AsyncSessionLocal, init_db_schema
 from backend.app.models.entities import ClassSection, Subject, Batch, TimetableEntry
 
 
+# Official TE-B Weekly Timetable Definitions
 TIMETABLE_DEFINITIONS = [
-    # Monday
+    # MONDAY
     {"day": "Monday", "start": "09:00", "end": "10:00", "type": "ACTIVITY", "label": "H/M", "room": None, "batch": None, "code": None},
-    {"day": "Monday", "start": "10:00", "end": "11:00", "type": "SUBJECT", "label": "AIML-DN", "room": "CR 26", "batch": None, "code": None},
+    {"day": "Monday", "start": "10:00", "end": "11:00", "type": "SUBJECT", "label": "AIML - DN", "room": None, "batch": None, "code": None},
     {"day": "Monday", "start": "11:00", "end": "12:00", "type": "ACTIVITY", "label": "Mentoring", "room": None, "batch": None, "code": None},
-    {"day": "Monday", "start": "12:00", "end": "13:00", "type": "SUBJECT", "label": "TCS - DM", "room": "CR 26", "batch": None, "code": "24CSPC501C"},
-    {"day": "Monday", "start": "13:00", "end": "14:00", "type": "BREAK", "label": "Lunch Break", "room": None, "batch": None, "code": None},
-    {"day": "Monday", "start": "14:00", "end": "15:00", "type": "SUBJECT", "label": "CSS - DM", "room": "CR 26", "batch": None, "code": None},
+    {"day": "Monday", "start": "12:00", "end": "13:00", "type": "SUBJECT", "label": "TCS - DM", "room": None, "batch": None, "code": "24CSPC501C"},
+    {"day": "Monday", "start": "13:00", "end": "14:00", "type": "BREAK", "label": "LUNCH BREAK", "room": None, "batch": None, "code": None},
+    {"day": "Monday", "start": "14:00", "end": "15:00", "type": "SUBJECT", "label": "CSS - DM", "room": None, "batch": None, "code": None},
     {"day": "Monday", "start": "15:00", "end": "16:00", "type": "SUBJECT", "label": "B1 - TCS - DM", "room": None, "batch": "B1", "code": "24CSPC501C"},
-    {"day": "Monday", "start": "15:00", "end": "16:00", "type": "SUBJECT", "label": "B2 - WTL - SP - L6", "room": "L6", "batch": "B2", "code": "24CSVSE501C"},
-    {"day": "Monday", "start": "16:00", "end": "17:00", "type": "SUBJECT", "label": "B1 - SC - SKP - L4", "room": "L4", "batch": "B1", "code": "24CSPC502C"},
-    {"day": "Monday", "start": "16:00", "end": "17:00", "type": "SUBJECT", "label": "B2 - AIML - DN - L5", "room": "L5", "batch": "B2", "code": None},
+    {"day": "Monday", "start": "16:00", "end": "17:00", "type": "SUBJECT", "label": "B2 - WTL - SP - L6", "room": "L6", "batch": "B2", "code": "24CSVSE501C"},
 
-    # Tuesday
+    # TUESDAY
     {"day": "Tuesday", "start": "09:00", "end": "10:00", "type": "ACTIVITY", "label": "H/M", "room": None, "batch": None, "code": None},
     {"day": "Tuesday", "start": "10:00", "end": "11:00", "type": "SUBJECT", "label": "MDM - PG CR 26", "room": "CR 26", "batch": None, "code": "24MDM501XC"},
-    {"day": "Tuesday", "start": "11:00", "end": "12:00", "type": "SUBJECT", "label": "TCS - DM", "room": "CR 26", "batch": None, "code": "24CSPC501C"},
-    {"day": "Tuesday", "start": "12:00", "end": "13:00", "type": "SUBJECT", "label": "SC - SKP", "room": "CR 26", "batch": None, "code": "24CSPC502C"},
-    {"day": "Tuesday", "start": "13:00", "end": "14:00", "type": "BREAK", "label": "Lunch Break", "room": None, "batch": None, "code": None},
-    {"day": "Tuesday", "start": "14:00", "end": "15:00", "type": "SUBJECT", "label": "AIML - DN (SL)", "room": "SL", "batch": None, "code": None},
-    {"day": "Tuesday", "start": "15:00", "end": "16:00", "type": "SUBJECT", "label": "B1 - AIML - DN - L5", "room": "L5", "batch": "B1", "code": None},
-    {"day": "Tuesday", "start": "15:00", "end": "16:00", "type": "SUBJECT", "label": "B2 - SC - SKP - L4", "room": "L4", "batch": "B2", "code": "24CSPC502C"},
-    {"day": "Tuesday", "start": "16:00", "end": "17:00", "type": "SUBJECT", "label": "OE - I", "room": "CR 26", "batch": None, "code": "24OE501XC"},
+    {"day": "Tuesday", "start": "11:00", "end": "12:00", "type": "SUBJECT", "label": "MDM - PG CR 26", "room": "CR 26", "batch": None, "code": "24MDM501XC"},
+    {"day": "Tuesday", "start": "12:00", "end": "13:00", "type": "SUBJECT", "label": "MDM - PG CR 26", "room": "CR 26", "batch": None, "code": "24MDM501XC"},
+    {"day": "Tuesday", "start": "13:00", "end": "14:00", "type": "BREAK", "label": "LUNCH BREAK", "room": None, "batch": None, "code": None},
+    {"day": "Tuesday", "start": "14:00", "end": "15:00", "type": "SUBJECT", "label": "B1 - SC - SKP - L4", "room": "L4", "batch": "B1", "code": "24CSPC502C"},
+    {"day": "Tuesday", "start": "14:00", "end": "15:00", "type": "SUBJECT", "label": "B2 - AIML - DN - L5", "room": "L5", "batch": "B2", "code": None},
+    {"day": "Tuesday", "start": "15:00", "end": "16:00", "type": "SUBJECT", "label": "B1 - SC - SKP - L4", "room": "L4", "batch": "B1", "code": "24CSPC502C"},
+    {"day": "Tuesday", "start": "15:00", "end": "16:00", "type": "SUBJECT", "label": "B2 - AIML - DN - L5", "room": "L5", "batch": "B2", "code": None},
+    {"day": "Tuesday", "start": "16:00", "end": "17:00", "type": "SUBJECT", "label": "AIML - DN (SL)", "room": "SL", "batch": None, "code": None},
 
-    # Wednesday
+    # WEDNESDAY
     {"day": "Wednesday", "start": "09:00", "end": "10:00", "type": "ACTIVITY", "label": "H/M", "room": None, "batch": None, "code": None},
-    {"day": "Wednesday", "start": "10:00", "end": "11:00", "type": "SUBJECT", "label": "B1 - WTL - SP - L5", "room": "L5", "batch": "B1", "code": "24CSVSE501C"},
-    {"day": "Wednesday", "start": "10:00", "end": "11:00", "type": "SUBJECT", "label": "B2 - TCS - DM", "room": None, "batch": "B2", "code": "24CSPC501C"},
-    {"day": "Wednesday", "start": "11:00", "end": "12:00", "type": "SUBJECT", "label": "AIML-DN", "room": "CR 26", "batch": None, "code": None},
-    {"day": "Wednesday", "start": "12:00", "end": "13:00", "type": "SUBJECT", "label": "OE - I", "room": "CR 26", "batch": None, "code": "24OE501XC"},
-    {"day": "Wednesday", "start": "13:00", "end": "14:00", "type": "BREAK", "label": "Lunch Break", "room": None, "batch": None, "code": None},
-    {"day": "Wednesday", "start": "14:00", "end": "15:00", "type": "SUBJECT", "label": "MDM - PG CR 26", "room": "CR 26", "batch": None, "code": "24MDM501XC"},
-    {"day": "Wednesday", "start": "15:00", "end": "16:00", "type": "SUBJECT", "label": "SC - SKP", "room": "CR 26", "batch": None, "code": "24CSPC502C"},
-    {"day": "Wednesday", "start": "16:00", "end": "17:00", "type": "ACTIVITY", "label": "Library", "room": None, "batch": None, "code": None},
+    {"day": "Wednesday", "start": "10:00", "end": "11:00", "type": "SUBJECT", "label": "B1 - AIML - DN - L5", "room": "L5", "batch": "B1", "code": None},
+    {"day": "Wednesday", "start": "10:00", "end": "11:00", "type": "SUBJECT", "label": "B2 - SC - SKP - L4", "room": "L4", "batch": "B2", "code": "24CSPC502C"},
+    {"day": "Wednesday", "start": "11:00", "end": "12:00", "type": "SUBJECT", "label": "B1 - AIML - DN - L5", "room": "L5", "batch": "B1", "code": None},
+    {"day": "Wednesday", "start": "11:00", "end": "12:00", "type": "SUBJECT", "label": "B2 - SC - SKP - L4", "room": "L4", "batch": "B2", "code": "24CSPC502C"},
+    {"day": "Wednesday", "start": "12:00", "end": "13:00", "type": "SUBJECT", "label": "TCS - DM", "room": None, "batch": None, "code": "24CSPC501C"},
+    {"day": "Wednesday", "start": "13:00", "end": "14:00", "type": "BREAK", "label": "LUNCH BREAK", "room": None, "batch": None, "code": None},
+    {"day": "Wednesday", "start": "14:00", "end": "15:00", "type": "ACTIVITY", "label": "LIBRARY", "room": None, "batch": None, "code": None},
+    {"day": "Wednesday", "start": "15:00", "end": "16:00", "type": "SUBJECT", "label": "MDM - PG L1", "room": "L1", "batch": None, "code": "24MDM501XC"},
+    {"day": "Wednesday", "start": "16:00", "end": "17:00", "type": "SUBJECT", "label": "MDM - PG L1", "room": "L1", "batch": None, "code": "24MDM501XC"},
 
-    # Thursday
+    # THURSDAY
     {"day": "Thursday", "start": "09:00", "end": "10:00", "type": "ACTIVITY", "label": "H/M", "room": None, "batch": None, "code": None},
-    {"day": "Thursday", "start": "10:00", "end": "11:00", "type": "SUBJECT", "label": "OE - I", "room": "CR 26", "batch": None, "code": "24OE501XC"},
-    {"day": "Thursday", "start": "11:00", "end": "12:00", "type": "SUBJECT", "label": "MDM - PG L1", "room": "L1", "batch": None, "code": "24MDM501XC"},
-    {"day": "Thursday", "start": "12:00", "end": "13:00", "type": "SUBJECT", "label": "AIML-DN", "room": "CR 26", "batch": None, "code": None},
-    {"day": "Thursday", "start": "13:00", "end": "14:00", "type": "BREAK", "label": "Lunch Break", "room": None, "batch": None, "code": None},
-    {"day": "Thursday", "start": "14:00", "end": "15:00", "type": "SUBJECT", "label": "TCS - DM", "room": "CR 26", "batch": None, "code": "24CSPC501C"},
-    {"day": "Thursday", "start": "15:00", "end": "16:00", "type": "SUBJECT", "label": "TCS - DM (SL)", "room": "SL", "batch": None, "code": "24CSPC501C"},
-    {"day": "Thursday", "start": "16:00", "end": "17:00", "type": "ACTIVITY", "label": "Mentoring", "room": None, "batch": None, "code": None},
+    {"day": "Thursday", "start": "10:00", "end": "11:00", "type": "SUBJECT", "label": "OE - I", "room": None, "batch": None, "code": "24OE501XC"},
+    {"day": "Thursday", "start": "11:00", "end": "12:00", "type": "SUBJECT", "label": "OE - I", "room": None, "batch": None, "code": "24OE501XC"},
+    {"day": "Thursday", "start": "12:00", "end": "13:00", "type": "SUBJECT", "label": "AIML - DN", "room": None, "batch": None, "code": None},
+    {"day": "Thursday", "start": "13:00", "end": "14:00", "type": "BREAK", "label": "LUNCH BREAK", "room": None, "batch": None, "code": None},
+    {"day": "Thursday", "start": "14:00", "end": "15:00", "type": "SUBJECT", "label": "AIML - DN", "room": None, "batch": None, "code": None},
+    {"day": "Thursday", "start": "15:00", "end": "16:00", "type": "SUBJECT", "label": "SC - SKP", "room": None, "batch": None, "code": "24CSPC502C"},
+    {"day": "Thursday", "start": "16:00", "end": "17:00", "type": "SUBJECT", "label": "SC - SKP (SL)", "room": "SL", "batch": None, "code": "24CSPC502C"},
 
-    # Friday
+    # FRIDAY
     {"day": "Friday", "start": "09:00", "end": "10:00", "type": "ACTIVITY", "label": "H/M", "room": None, "batch": None, "code": None},
-    {"day": "Friday", "start": "10:00", "end": "11:00", "type": "SUBJECT", "label": "SC - SKP", "room": "CR 26", "batch": None, "code": "24CSPC502C"},
-    {"day": "Friday", "start": "11:00", "end": "12:00", "type": "SUBJECT", "label": "TCS - DM", "room": "CR 26", "batch": None, "code": "24CSPC501C"},
-    {"day": "Friday", "start": "12:00", "end": "13:00", "type": "SUBJECT", "label": "MDM - PG CR 26", "room": "CR 26", "batch": None, "code": "24MDM501XC"},
-    {"day": "Friday", "start": "13:00", "end": "14:00", "type": "BREAK", "label": "Lunch Break", "room": None, "batch": None, "code": None},
-    {"day": "Friday", "start": "14:00", "end": "15:00", "type": "SUBJECT", "label": "OE - I", "room": "CR 26", "batch": None, "code": "24OE501XC"},
-    {"day": "Friday", "start": "15:00", "end": "16:00", "type": "SUBJECT", "label": "AIML-DN", "room": "CR 26", "batch": None, "code": None},
-    {"day": "Friday", "start": "16:00", "end": "17:00", "type": "ACTIVITY", "label": "Library", "room": None, "batch": None, "code": None},
+    {"day": "Friday", "start": "10:00", "end": "11:00", "type": "SUBJECT", "label": "SC - SKP", "room": None, "batch": None, "code": "24CSPC502C"},
+    {"day": "Friday", "start": "11:00", "end": "12:00", "type": "SUBJECT", "label": "TCS - DM", "room": None, "batch": None, "code": "24CSPC501C"},
+    {"day": "Friday", "start": "12:00", "end": "13:00", "type": "SUBJECT", "label": "AIML - DN", "room": None, "batch": None, "code": None},
+    {"day": "Friday", "start": "13:00", "end": "14:00", "type": "BREAK", "label": "LUNCH BREAK", "room": None, "batch": None, "code": None},
+    {"day": "Friday", "start": "14:00", "end": "15:00", "type": "SUBJECT", "label": "B1 - WTL - SP - L5", "room": "L5", "batch": "B1", "code": "24CSVSE501C"},
+    {"day": "Friday", "start": "14:00", "end": "15:00", "type": "SUBJECT", "label": "B2 - TCS - DM", "room": None, "batch": "B2", "code": "24CSPC501C"},
+    {"day": "Friday", "start": "15:00", "end": "16:00", "type": "SUBJECT", "label": "B1 - WTL - SP - L5", "room": "L5", "batch": "B1", "code": "24CSVSE501C"},
+    {"day": "Friday", "start": "15:00", "end": "16:00", "type": "SUBJECT", "label": "B2 - TCS - DM", "room": None, "batch": "B2", "code": "24CSPC501C"},
+    {"day": "Friday", "start": "16:00", "end": "17:00", "type": "SUBJECT", "label": "TCS - DM (SL)", "room": "SL", "batch": None, "code": "24CSPC501C"},
 ]
 
 
@@ -126,7 +129,6 @@ async def import_timetable():
         subjects_by_code = {s.code: s for s in subjects}
 
         # 4. Upsert Timetable Entries
-        # Clear previous timetable entries for TE-B to ensure strict consistency on re-run
         del_tt = delete(TimetableEntry).where(TimetableEntry.class_id == teb_class.id)
         await db.execute(del_tt)
 

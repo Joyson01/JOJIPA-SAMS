@@ -3,6 +3,7 @@ import {
   LayoutDashboard,
   Users,
   BookOpen,
+  Calendar,
   Camera,
   Video,
   Film,
@@ -21,7 +22,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'students', label: 'Students', icon: Users },
-    { id: 'subjects', label: 'Subjects', icon: BookOpen },
+    { id: 'subjects', label: 'Academic & Courses', icon: BookOpen },
+    { id: 'timetable', label: 'Weekly Timetable', icon: Calendar },
     { id: 'enrollment', label: 'Enrollment', icon: Camera },
     { id: 'live', label: 'Live Attendance', icon: Video },
     { id: 'media', label: 'Media Attendance', icon: Film },
