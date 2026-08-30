@@ -81,7 +81,7 @@ export const App: React.FC = () => {
           onNavigate={handleNavigate}
         />
       )}
-      {activeTab === 'live' && <LiveDashboardPage />}
+      {activeTab === 'live' && <LiveDashboardPage onNavigate={handleNavigate} />}
       {activeTab === 'media' && <MediaAttendancePage />}
       {activeTab === 'attendance' && <AttendancePage />}
       {activeTab === 'cameras' && <CameraManagementPage />}
