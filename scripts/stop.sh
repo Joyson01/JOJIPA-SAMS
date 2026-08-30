@@ -64,3 +64,4 @@ fi
 
 echo ""
 echo "✓ All JOJIPA-SAMS services are stopped."
+

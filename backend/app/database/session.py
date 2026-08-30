@@ -136,6 +136,7 @@ async def check_database_connection() -> Tuple[bool, str, float]:
 
 async def init_db_schema() -> None:
     """Initializes tables for local development/testing."""
+    import backend.app.models.entities  # noqa: F401
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
