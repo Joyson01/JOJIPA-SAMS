@@ -226,7 +226,19 @@ docker-compose up -d postgres
 alembic -c backend/alembic.ini upgrade head
 ```
 
-_(Optional: Run `python -m scripts.seed_demo` if you wish to populate initial demo data)._
+### Official Academic Curriculum Import (Computer Engineering — Class TE-B)
+
+To populate the real academic classes, 7 accredited courses (22 total credits), and timetable schedule from the official syllabus:
+
+```bash
+python3 scripts/import_teb_curriculum.py
+```
+
+This registers:
+
+- **Class Section:** `TE-B` (Department of Computer Engineering, Effective From: `15/06/2026`)
+- **7 Accredited Courses:** `Theoretical Computer Science` (4 Cr), `Soft Computing` (3 Cr), `Program Elective – I` (4 Cr), `Program Elective – II` (3 Cr), `Multidisciplinary Minor` (4 Cr), `Open Elective I` (3 Cr), `Employability Enhancement Program -IV (Web Technology Lab)` (1 Cr). Total: **22 Credits**.
+- **Weekly Schedule:** 34 slots spanning Monday–Friday (9:00 AM – 5:00 PM) including designated `LUNCH BREAK` intervals and activity periods.
 
 ## 12. Running Backend
 

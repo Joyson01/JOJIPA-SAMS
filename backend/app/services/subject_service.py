@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.exceptions import SAMSException
 from backend.app.core.logging import logger
-from backend.app.models.entities import AttendanceSession, Subject
+from backend.app.models.entities import AttendanceSession, ClassSection, ClassSubject, Subject
 from backend.app.schemas.subject import SubjectCreate, SubjectResponse, SubjectUpdate
 
 
@@ -44,7 +44,14 @@ class SubjectService:
             code=subject_in.code,
             name=subject_in.name,
             short_name=subject_in.short_name,
+            vertical=subject_in.vertical,
             department=subject_in.department,
+            theory_hours=subject_in.theory_hours,
+            tutorial_hours=subject_in.tutorial_hours,
+            practical_hours=subject_in.practical_hours,
+            theory_credits=subject_in.theory_credits,
+            tutorial_credits=subject_in.tutorial_credits,
+            practical_credits=subject_in.practical_credits,
             credits=subject_in.credits,
             semester=subject_in.semester,
             academic_year=subject_in.academic_year,
@@ -53,6 +60,17 @@ class SubjectService:
         db.add(subject)
         await db.commit()
         await db.refresh(subject)
+
+        # Assign to classes if specified
+        if subject_in.assigned_classes:
+            for class_name in subject_in.assigned_classes:
+                cq = select(ClassSection).where(ClassSection.name == class_name)
+                class_obj = (await db.execute(cq)).scalars().first()
+                if class_obj:
+                    link = ClassSubject(class_id=class_obj.id, subject_id=subject.id)
+                    db.add(link)
+            await db.commit()
+
         logger.info(f"Created subject '{subject.code} - {subject.name}' ({subject.id})")
         return await cls._serialize_subject(db, subject)
 
@@ -88,6 +106,7 @@ class SubjectService:
                 Subject.code.ilike(f"%{search}%"),
                 Subject.name.ilike(f"%{search}%"),
                 Subject.short_name.ilike(f"%{search}%"),
+                Subject.vertical.ilike(f"%{search}%"),
             )
             filters.append(search_filter)
 
@@ -112,10 +131,26 @@ class SubjectService:
             raise SubjectNotFoundError(subject_id)
 
         update_dict = update_in.model_dump(exclude_unset=True)
+        assigned_classes = update_dict.pop("assigned_classes", None)
+
         for field, value in update_dict.items():
             if field == "status" and value:
                 value = value.upper()
             setattr(subject, field, value)
+
+        if assigned_classes is not None:
+            # Re-sync class links
+            del_q = select(ClassSubject).where(ClassSubject.subject_id == subject_id)
+            existing_links = (await db.execute(del_q)).scalars().all()
+            for l in existing_links:
+                await db.delete(l)
+
+            for class_name in assigned_classes:
+                cq = select(ClassSection).where(ClassSection.name == class_name)
+                class_obj = (await db.execute(cq)).scalars().first()
+                if class_obj:
+                    link = ClassSubject(class_id=class_obj.id, subject_id=subject.id)
+                    db.add(link)
 
         await db.commit()
         await db.refresh(subject)
@@ -150,16 +185,32 @@ class SubjectService:
         sessions_q = select(func.count(AttendanceSession.id)).where(AttendanceSession.subject_id == subject.id)
         session_count = (await db.execute(sessions_q)).scalar_one()
 
+        # Fetch assigned class names
+        classes_q = (
+            select(ClassSection.name)
+            .join(ClassSubject, ClassSubject.class_id == ClassSection.id)
+            .where(ClassSubject.subject_id == subject.id)
+        )
+        assigned_classes = (await db.execute(classes_q)).scalars().all()
+
         return SubjectResponse(
             id=subject.id,
             code=subject.code,
             name=subject.name,
             short_name=subject.short_name,
+            vertical=subject.vertical,
             department=subject.department,
+            theory_hours=subject.theory_hours or 0,
+            tutorial_hours=subject.tutorial_hours or 0,
+            practical_hours=subject.practical_hours or 0,
+            theory_credits=subject.theory_credits or 0,
+            tutorial_credits=subject.tutorial_credits or 0,
+            practical_credits=subject.practical_credits or 0,
             credits=subject.credits,
             semester=subject.semester,
             academic_year=subject.academic_year,
             status=subject.status,
+            assigned_classes=list(assigned_classes),
             total_sessions_count=session_count,
             created_at=subject.created_at,
             updated_at=subject.updated_at,

@@ -135,10 +135,30 @@ async def check_database_connection() -> Tuple[bool, str, float]:
 
 
 async def init_db_schema() -> None:
-    """Initializes tables for local development/testing."""
+    """Initializes tables and migrates schema columns for local development/testing."""
     import backend.app.models.entities  # noqa: F401
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    logger.info("Database schema initialized successfully.")
+
+        # Dynamic column additions for SQLite/Postgres backwards compatibility
+        alter_statements = [
+            ("classes", "effective_from", "VARCHAR(32) DEFAULT '15/06/2026'"),
+            ("subjects", "vertical", "VARCHAR(32)"),
+            ("subjects", "theory_hours", "INTEGER DEFAULT 0"),
+            ("subjects", "tutorial_hours", "INTEGER DEFAULT 0"),
+            ("subjects", "practical_hours", "INTEGER DEFAULT 0"),
+            ("subjects", "theory_credits", "INTEGER DEFAULT 0"),
+            ("subjects", "tutorial_credits", "INTEGER DEFAULT 0"),
+            ("subjects", "practical_credits", "INTEGER DEFAULT 0"),
+        ]
+
+        for table, col, col_type in alter_statements:
+            try:
+                await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}"))
+            except Exception:
+                # Column already exists or table not ready
+                pass
+
+    logger.info("Database schema initialized and columns synchronized successfully.")
 

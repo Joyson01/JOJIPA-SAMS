@@ -113,12 +113,24 @@ class Subject(Base):
     __tablename__ = "subjects"
 
     id: Mapped[str] = mapped_column(GUID, primary_key=True, default=generate_uuid)
-    code: Mapped[str] = mapped_column(String(32), unique=True, index=True, nullable=False)  # e.g. CS401
-    name: Mapped[str] = mapped_column(String(128), nullable=False)                          # e.g. Computer Networks
-    short_name: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)          # e.g. CN
-    department: Mapped[str] = mapped_column(String(64), index=True, nullable=False)        # e.g. Computer Science
-    credits: Mapped[int] = mapped_column(Integer, default=4, nullable=False)
-    semester: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    code: Mapped[str] = mapped_column(String(32), unique=True, index=True, nullable=False)  # e.g. 24CSPC501C
+    name: Mapped[str] = mapped_column(String(128), nullable=False)                          # e.g. Theoretical Computer Science
+    short_name: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)          # e.g. TCS
+    vertical: Mapped[Optional[str]] = mapped_column(String(32), index=True, nullable=True) # PCC, PEC, MDM, OE, VSEC
+    department: Mapped[str] = mapped_column(String(64), index=True, nullable=False)        # e.g. Computer Engineering
+    
+    # Contact Hours
+    theory_hours: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    tutorial_hours: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    practical_hours: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    # Credits Allotted
+    theory_credits: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    tutorial_credits: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    practical_credits: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    credits: Mapped[int] = mapped_column(Integer, default=4, nullable=False)                # Total Credits
+
+    semester: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
     academic_year: Mapped[str] = mapped_column(String(32), default="2026-2027", nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="ACTIVE", index=True, nullable=False)  # ACTIVE, INACTIVE
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
@@ -126,21 +138,65 @@ class Subject(Base):
 
     # Relationships
     sessions = relationship("AttendanceSession", back_populates="subject_entity")
+    class_subjects = relationship("ClassSubject", back_populates="subject", cascade="all, delete-orphan")
 
 
 class ClassSection(Base):
     __tablename__ = "classes"
 
     id: Mapped[str] = mapped_column(GUID, primary_key=True, default=generate_uuid)
-    name: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)  # e.g. CSE-4A
-    department: Mapped[str] = mapped_column(String(64), index=True, nullable=False)         # e.g. Computer Science
-    year: Mapped[int] = mapped_column(Integer, default=4, nullable=False)
-    semester: Mapped[int] = mapped_column(Integer, default=4, nullable=False)
-    section: Mapped[str] = mapped_column(String(16), default="A", nullable=False)
+    name: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)  # e.g. TE-B
+    department: Mapped[str] = mapped_column(String(64), index=True, nullable=False)         # e.g. Computer Engineering
+    effective_from: Mapped[Optional[str]] = mapped_column(String(32), default="15/06/2026", nullable=True)
+    year: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
+    semester: Mapped[int] = mapped_column(Integer, default=5, nullable=False)
+    section: Mapped[str] = mapped_column(String(16), default="B", nullable=False)
     academic_year: Mapped[str] = mapped_column(String(32), default="2026-2027", nullable=False)
     status: Mapped[str] = mapped_column(String(32), default="ACTIVE", index=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+    # Relationships
+    class_subjects = relationship("ClassSubject", back_populates="class_section", cascade="all, delete-orphan")
+    timetable_entries = relationship("TimetableEntry", back_populates="class_section", cascade="all, delete-orphan")
+
+
+class ClassSubject(Base):
+    __tablename__ = "class_subjects"
+
+    id: Mapped[str] = mapped_column(GUID, primary_key=True, default=generate_uuid)
+    class_id: Mapped[str] = mapped_column(GUID, ForeignKey("classes.id", ondelete="CASCADE"), index=True, nullable=False)
+    subject_id: Mapped[str] = mapped_column(GUID, ForeignKey("subjects.id", ondelete="CASCADE"), index=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("class_id", "subject_id", name="uq_class_subject"),
+    )
+
+    class_section = relationship("ClassSection", back_populates="class_subjects")
+    subject = relationship("Subject", back_populates="class_subjects")
+
+
+class TimetableEntry(Base):
+    __tablename__ = "timetable_entries"
+
+    id: Mapped[str] = mapped_column(GUID, primary_key=True, default=generate_uuid)
+    class_id: Mapped[str] = mapped_column(GUID, ForeignKey("classes.id", ondelete="CASCADE"), index=True, nullable=False)
+    subject_id: Mapped[Optional[str]] = mapped_column(GUID, ForeignKey("subjects.id", ondelete="SET NULL"), index=True, nullable=True)
+    day_of_week: Mapped[str] = mapped_column(String(16), index=True, nullable=False)  # Monday, Tuesday, Wednesday, Thursday, Friday
+    start_time: Mapped[str] = mapped_column(String(16), nullable=False)  # e.g. "09:00", "10:00"
+    end_time: Mapped[str] = mapped_column(String(16), nullable=False)    # e.g. "10:00", "11:00"
+    entry_type: Mapped[str] = mapped_column(String(32), default="SUBJECT", index=True, nullable=False)  # SUBJECT, ACTIVITY, BREAK
+    label: Mapped[str] = mapped_column(String(128), nullable=False)      # e.g. "TCS-DM", "LUNCH BREAK", "Mentoring", "MDM - PG CR 26"
+    batch: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)  # e.g. "B1", "B2", "ALL"
+    room: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)   # e.g. "CR 26", "L5", "L4", "L6", "L1", "SL"
+    effective_from: Mapped[Optional[str]] = mapped_column(String(32), default="15/06/2026", nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="ACTIVE", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+    class_section = relationship("ClassSection", back_populates="timetable_entries")
+    subject = relationship("Subject")
 
 
 class AttendanceSession(Base):

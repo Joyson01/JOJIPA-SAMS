@@ -4,6 +4,7 @@ import {
   SubjectCreatePayload,
   ClassSection,
   ClassSectionCreatePayload,
+  TimetableEntry,
 } from '../types/subject';
 
 export const fetchSubjects = async (
@@ -72,3 +73,25 @@ export const deleteClass = async (id: string): Promise<void> => {
   await apiClient.delete(`/classes/${id}`);
 };
 
+export const fetchClassTimetable = async (
+  classId: string,
+  dayOfWeek?: string
+): Promise<TimetableEntry[]> => {
+  const response = await apiClient.get<TimetableEntry[]>(`/classes/${classId}/timetable`, {
+    params: { day_of_week: dayOfWeek || undefined },
+  });
+  return response.data;
+};
+
+export const fetchAllTimetableEntries = async (
+  classId?: string,
+  dayOfWeek?: string
+): Promise<TimetableEntry[]> => {
+  const response = await apiClient.get<TimetableEntry[]>('/classes/timetable/entries', {
+    params: {
+      class_id: classId || undefined,
+      day_of_week: dayOfWeek || undefined,
+    },
+  });
+  return response.data;
+};

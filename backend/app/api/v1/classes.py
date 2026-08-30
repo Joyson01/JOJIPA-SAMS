@@ -8,6 +8,10 @@ from backend.app.schemas.class_section import (
     ClassSectionResponse,
     ClassSectionUpdate,
 )
+from backend.app.schemas.timetable import (
+    TimetableEntryCreate,
+    TimetableEntryResponse,
+)
 from backend.app.services.class_service import ClassService
 
 router = APIRouter(prefix="/classes", tags=["Classes & Sections"])
@@ -48,6 +52,19 @@ async def list_classes(
 
 
 @router.get(
+    "/timetable/entries",
+    response_model=List[TimetableEntryResponse],
+    summary="List All Timetable Entries",
+)
+async def list_all_timetable_entries(
+    class_id: Optional[str] = Query(None),
+    day_of_week: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+) -> List[TimetableEntryResponse]:
+    return await ClassService.list_timetable_entries(db, class_id=class_id, day_of_week=day_of_week)
+
+
+@router.get(
     "/{class_id}",
     response_model=ClassSectionResponse,
     summary="Get Class Details",
@@ -57,6 +74,34 @@ async def get_class(
     db: AsyncSession = Depends(get_db),
 ) -> ClassSectionResponse:
     return await ClassService.get_class_by_id(db, class_id)
+
+
+@router.get(
+    "/{class_id}/timetable",
+    response_model=List[TimetableEntryResponse],
+    summary="Get Class Timetable",
+)
+async def get_class_timetable(
+    class_id: str,
+    day_of_week: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+) -> List[TimetableEntryResponse]:
+    return await ClassService.list_timetable_entries(db, class_id=class_id, day_of_week=day_of_week)
+
+
+@router.post(
+    "/{class_id}/timetable",
+    response_model=TimetableEntryResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Add Timetable Slot",
+)
+async def add_timetable_entry(
+    class_id: str,
+    entry_in: TimetableEntryCreate,
+    db: AsyncSession = Depends(get_db),
+) -> TimetableEntryResponse:
+    entry_in.class_id = class_id
+    return await ClassService.create_timetable_entry(db, entry_in)
 
 
 @router.put(
