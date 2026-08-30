@@ -1,0 +1,47 @@
+import { apiClient } from './api';
+import { CameraCreatePayload, CameraDevice, CameraTestResult } from '../types/camera';
+
+export const fetchCameras = async (location?: string, assigned_class?: string): Promise<CameraDevice[]> => {
+  const response = await apiClient.get<CameraDevice[]>('/cameras', {
+    params: {
+      location: location || undefined,
+      assigned_class: assigned_class || undefined,
+    },
+  });
+  return response.data;
+};
+
+export const createCamera = async (payload: CameraCreatePayload): Promise<CameraDevice> => {
+  const response = await apiClient.post<CameraDevice>('/cameras', payload);
+  return response.data;
+};
+
+export const updateCamera = async (cameraId: string, payload: Partial<CameraCreatePayload>): Promise<CameraDevice> => {
+  const response = await apiClient.put<CameraDevice>(`/cameras/${cameraId}`, payload);
+  return response.data;
+};
+
+export const deleteCamera = async (cameraId: string): Promise<void> => {
+  await apiClient.delete(`/cameras/${cameraId}`);
+};
+
+export const testRegisteredCamera = async (cameraId: string): Promise<CameraTestResult> => {
+  const response = await apiClient.post<CameraTestResult>(`/cameras/${cameraId}/test`);
+  return response.data;
+};
+
+export const testCameraConnection = async (streamUrl?: string, deviceId?: string): Promise<CameraTestResult> => {
+  const response = await apiClient.post<CameraTestResult>('/cameras/test-connection', {
+    stream_url: streamUrl,
+    device_id: deviceId,
+  });
+  return response.data;
+};
+
+export const startCameraWorker = async (cameraId: string): Promise<void> => {
+  await apiClient.post(`/cameras/${cameraId}/start`);
+};
+
+export const stopCameraWorker = async (cameraId: string): Promise<void> => {
+  await apiClient.post(`/cameras/${cameraId}/stop`);
+};

@@ -1,0 +1,12 @@
+[project]
+name = "sams-mark-2"
+version = "1.0.0"
+description = "AI Face Attendance Management System"
+readme = "README.md"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
