@@ -43,6 +43,7 @@ async def create_session(
 async def list_sessions(
     class_name: Optional[str] = Query(None, description="Filter by class/batch"),
     subject: Optional[str] = Query(None, description="Filter by subject"),
+    subject_id: Optional[str] = Query(None, description="Filter by subject ID"),
     status: Optional[str] = Query(None, description="Filter by status (SCHEDULED, ACTIVE, COMPLETED, CANCELLED)"),
     scheduled_date: Optional[date] = Query(None, description="Filter by scheduled date"),
     page: int = Query(1, ge=1),
@@ -53,6 +54,7 @@ async def list_sessions(
         db=db,
         class_name=class_name,
         subject=subject,
+        subject_id=subject_id,
         status=status,
         scheduled_date=scheduled_date,
         page=page,
@@ -145,6 +147,28 @@ async def get_session_records(
     db: AsyncSession = Depends(get_db),
 ) -> List[AttendanceRecordResponse]:
     return await AttendanceService.get_session_records(db, session_id, status=status)
+
+
+@router.post(
+    "/manual",
+    response_model=AttendanceRecordResponse,
+    summary="Record Manual Attendance or Excused Absence",
+    description="Directly marks a student attendance status manually (e.g. EXCUSED with reason or manual roll call).",
+)
+async def mark_manual_attendance(
+    session_id: str = Query(..., description="Session ID"),
+    student_id: str = Query(..., description="Student ID"),
+    status: str = Query("PRESENT", description="Status (PRESENT, ABSENT, LATE, EXCUSED)"),
+    remarks: str = Query("Manual Attendance", description="Optional remarks or leave reason"),
+    db: AsyncSession = Depends(get_db),
+) -> AttendanceRecordResponse:
+    return await AttendanceService.mark_manual_attendance(
+        db=db,
+        session_id=session_id,
+        student_id=student_id,
+        status=status,
+        remarks=remarks,
+    )
 
 
 @router.put(

@@ -7,6 +7,7 @@ import { AttendancePage } from './features/attendance/AttendancePage';
 import { LiveDashboardPage } from './features/live/LiveDashboardPage';
 import { ReportsPage } from './features/reports/ReportsPage';
 import { CameraManagementPage } from './features/cameras/CameraManagementPage';
+import { SubjectManagementPage } from './features/subjects/SubjectManagementPage';
 import { SettingsPage } from './features/settings/SettingsPage';
 import { MobileCameraPage } from './features/mobile/MobileCameraPage';
 import { MobileEnrollmentPage } from './features/mobile/MobileEnrollmentPage';
@@ -72,6 +73,7 @@ export const App: React.FC = () => {
     >
       {activeTab === 'dashboard' && <DashboardOverview onNavigate={handleNavigate} />}
       {activeTab === 'students' && <StudentListPage onNavigate={handleNavigate} />}
+      {activeTab === 'subjects' && <SubjectManagementPage />}
       {activeTab === 'enrollment' && (
         <FaceEnrollmentPage
           initialStudentId={enrollingStudentId}

@@ -1,4 +1,5 @@
 from datetime import date, datetime, time, timedelta, timezone
+import os
 from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +14,7 @@ from backend.app.core.exceptions import (
     StudentNotFoundError,
 )
 from backend.app.core.logging import logger
-from backend.app.models.entities import AttendanceRecord, AttendanceSession, AuditLog, Student
+from backend.app.models.entities import AttendanceRecord, AttendanceSession, AuditLog, ClassSection, Student, Subject
 from backend.app.schemas.attendance import (
     AttendanceMarkPayload,
     AttendanceOverridePayload,
@@ -30,26 +31,77 @@ def _utc_now() -> datetime:
 
 
 class AttendanceService:
-    """Service layer managing attendance sessions, deduplication engine, and manual correction audit trails."""
+    """Service layer managing academic attendance sessions, subjects, deduplication, and audit trails."""
 
     @classmethod
     async def create_session(cls, db: AsyncSession, session_in: SessionCreate, creator_user_id: Optional[str] = None) -> AttendanceSession:
-        """Creates a new scheduled attendance session."""
-        # Check duplicate session code
-        existing = await db.execute(select(AttendanceSession).where(AttendanceSession.session_code == session_in.session_code))
-        if existing.scalars().first() is not None:
-            raise SessionAlreadyExistsError(session_in.session_code)
+        """Creates a new scheduled attendance session with subject/class resolution and conflict checks."""
+        subject_name = session_in.subject
+        subject_code = None
+
+        # Resolve subject if subject_id provided
+        if session_in.subject_id:
+            subj = await db.get(Subject, session_in.subject_id)
+            if subj:
+                subject_name = subj.name
+                subject_code = subj.code
+
+        # Resolve class if class_id provided
+        class_name = session_in.class_name
+        if session_in.class_id:
+            cls_obj = await db.get(ClassSection, session_in.class_id)
+            if cls_obj:
+                class_name = cls_obj.name
+
+        # Auto-generate session code if not provided
+        session_code = session_in.session_code
+        if not session_code:
+            sched_date_str = (session_in.scheduled_date or date.today()).strftime("%Y%m%d")
+            clean_cls = class_name.replace(" ", "-")
+            session_code = f"SESS-{clean_cls}-{sched_date_str}-{os.urandom(2).hex()}"
+        else:
+            code_q = select(AttendanceSession).where(AttendanceSession.session_code == session_code)
+            existing_code = (await db.execute(code_q)).scalars().first()
+            if existing_code:
+                raise SessionAlreadyExistsError(session_code)
+
+        # Conflict check: Overlapping session for same class on same date
+        existing_conflict_q = select(AttendanceSession).where(
+            and_(
+                AttendanceSession.class_name == class_name,
+                AttendanceSession.scheduled_date == (session_in.scheduled_date or date.today()),
+                AttendanceSession.status.in_(["SCHEDULED", "ACTIVE"]),
+                or_(
+                    and_(
+                        AttendanceSession.start_time <= session_in.start_time,
+                        AttendanceSession.end_time > session_in.start_time,
+                    ),
+                    and_(
+                        AttendanceSession.start_time < session_in.end_time,
+                        AttendanceSession.end_time >= session_in.end_time,
+                    ),
+                ),
+            )
+        )
+        conflicts = (await db.execute(existing_conflict_q)).scalars().all()
+        if conflicts:
+            logger.warning(f"Session conflict detected for class {class_name} with session {conflicts[0].session_code}")
 
         session = AttendanceSession(
-            session_code=session_in.session_code,
-            class_name=session_in.class_name,
-            subject=session_in.subject,
+            session_code=session_code,
+            subject_id=session_in.subject_id,
+            class_id=session_in.class_id,
+            class_name=class_name,
+            subject=subject_name,
             room=session_in.room,
             scheduled_date=session_in.scheduled_date or date.today(),
             start_time=session_in.start_time,
             end_time=session_in.end_time,
+            late_threshold_minutes=session_in.late_threshold_minutes,
+            attendance_mode=session_in.attendance_mode,
+            camera_id=session_in.camera_id,
+            camera_ids=session_in.camera_ids or ([session_in.camera_id] if session_in.camera_id else []),
             status="SCHEDULED",
-            camera_ids=session_in.camera_ids,
             created_by_user_id=creator_user_id,
         )
         db.add(session)
@@ -80,23 +132,37 @@ class AttendanceService:
         present_cnt = counts.get("PRESENT", 0) + counts.get("MANUAL_PRESENT", 0)
         late_cnt = counts.get("LATE", 0)
         absent_cnt = counts.get("ABSENT", 0) + counts.get("MANUAL_ABSENT", 0)
+        excused_cnt = counts.get("EXCUSED", 0) + counts.get("MANUAL_EXCUSED", 0)
         total_cnt = sum(counts.values())
+
+        subject_code = None
+        if session.subject_id:
+            subj = await db.get(Subject, session.subject_id)
+            if subj:
+                subject_code = subj.code
 
         return SessionResponse(
             id=session.id,
             session_code=session.session_code,
+            subject_id=session.subject_id,
+            class_id=session.class_id,
             class_name=session.class_name,
             subject=session.subject,
+            subject_code=subject_code,
             room=session.room,
             scheduled_date=session.scheduled_date,
             start_time=session.start_time,
             end_time=session.end_time,
+            late_threshold_minutes=session.late_threshold_minutes,
+            attendance_mode=session.attendance_mode,
             status=session.status,
+            camera_id=session.camera_id,
             camera_ids=session.camera_ids or [],
             total_records=total_cnt,
             present_count=present_cnt,
             late_count=late_cnt,
             absent_count=absent_cnt,
+            excused_count=excused_cnt,
             created_at=session.created_at,
             updated_at=session.updated_at,
         )
@@ -107,6 +173,7 @@ class AttendanceService:
         db: AsyncSession,
         class_name: Optional[str] = None,
         subject: Optional[str] = None,
+        subject_id: Optional[str] = None,
         status: Optional[str] = None,
         scheduled_date: Optional[date] = None,
         page: int = 1,
@@ -120,6 +187,8 @@ class AttendanceService:
             filters.append(AttendanceSession.class_name == class_name)
         if subject:
             filters.append(AttendanceSession.subject.ilike(f"%{subject}%"))
+        if subject_id:
+            filters.append(AttendanceSession.subject_id == subject_id)
         if status:
             filters.append(AttendanceSession.status == status.upper())
         if scheduled_date:
@@ -161,7 +230,7 @@ class AttendanceService:
 
     @classmethod
     async def close_session(cls, db: AsyncSession, session_id: str, auto_mark_absent: bool = True) -> SessionResponse:
-        """Closes an attendance session (COMPLETED) and optionally marks remaining enrolled students as ABSENT."""
+        """Closes an attendance session (COMPLETED) and auto-marks remaining class students as ABSENT."""
         session = await db.get(AttendanceSession, session_id)
         if not session:
             raise SessionNotFoundError(session_id)
@@ -191,6 +260,7 @@ class AttendanceService:
                         session_id=session_id,
                         student_id=st.id,
                         status="ABSENT",
+                        source="AUTO_ROSTER",
                         confidence=0.0,
                         liveness_score=0.0,
                         verification_metadata={"source": "AUTO_ABSENT_ON_CLOSE"},
@@ -200,6 +270,11 @@ class AttendanceService:
 
         await db.commit()
         await db.refresh(session)
+
+        # Cleanup runtime presence tracker
+        from backend.app.services.presence_service import presence_manager
+        presence_manager.reset_session(session_id)
+
         logger.info(f"Closed attendance session: {session.session_code}")
         return await cls.get_session_by_id(db, session_id)
 
@@ -209,11 +284,10 @@ class AttendanceService:
         db: AsyncSession,
         session_id: str,
         payload: AttendanceMarkPayload,
-        grace_minutes: int = 15,
     ) -> AttendanceRecordResponse:
         """Marks attendance ONCE per student+session with strict 3-level duplicate protection and presence tracking."""
         from sqlalchemy.exc import IntegrityError
-        from backend.app.services.presence_service import presence_manager, PresenceState
+        from backend.app.services.presence_service import presence_manager
 
         session = await db.get(AttendanceSession, session_id)
         if not session:
@@ -264,10 +338,11 @@ class AttendanceService:
             logger.info(f"[PRESENCE TRACKING] Updated last_seen for {student.student_code} ({presence_state})")
             return cls._serialize_record(existing, student)
 
-        # Determine if arrival is PRESENT vs LATE based on start_time
+        # Determine if arrival is PRESENT vs LATE based on start_time and session late threshold
         assigned_status = "PRESENT"
+        grace_min = session.late_threshold_minutes or 10
         scheduled_start = datetime.combine(session.scheduled_date, session.start_time, tzinfo=timezone.utc)
-        if now > (scheduled_start + timedelta(minutes=grace_minutes)):
+        if now > (scheduled_start + timedelta(minutes=grace_min)):
             assigned_status = "LATE"
 
         # Level 2 & 3: Atomic insertion with unique constraint fallback
@@ -276,6 +351,7 @@ class AttendanceService:
                 session_id=session_id,
                 student_id=payload.student_id,
                 status=assigned_status,
+                source=payload.source or "AI",
                 first_seen=now,
                 last_seen=now,
                 confidence=payload.confidence,
@@ -309,7 +385,7 @@ class AttendanceService:
         override_in: AttendanceOverridePayload,
         user_id: Optional[str] = None,
     ) -> AttendanceRecordResponse:
-        """Manually corrects attendance record with comprehensive audit trail logging."""
+        """Manually corrects attendance record (PRESENT, ABSENT, LATE, EXCUSED) with audit trail logging."""
         record = await db.get(AttendanceRecord, record_id)
         if not record:
             raise RecordNotFoundError(record_id)
@@ -323,6 +399,7 @@ class AttendanceService:
 
         # Update record
         record.status = new_status
+        record.source = "MANUAL"
         record.remarks = f"Manual override: {override_in.remarks}"
         record.marked_by_user_id = user_id or override_in.modified_by_user_id
         record.updated_at = _utc_now()
@@ -342,6 +419,60 @@ class AttendanceService:
         await db.refresh(record)
         logger.info(f"Manual override for record {record_id}: {old_status} -> {new_status} ({override_in.remarks})")
         return cls._serialize_record(record, student)
+
+    @classmethod
+    async def mark_manual_attendance(
+        cls,
+        db: AsyncSession,
+        session_id: str,
+        student_id: str,
+        status: str,
+        remarks: str = "Manual Attendance",
+        user_id: Optional[str] = None,
+    ) -> AttendanceRecordResponse:
+        """Directly marks manual attendance for a student (e.g. excused absence or manual roll-call)."""
+        session = await db.get(AttendanceSession, session_id)
+        if not session:
+            raise SessionNotFoundError(session_id)
+
+        student = await db.get(Student, student_id)
+        if not student:
+            raise StudentNotFoundError(student_id)
+
+        now = _utc_now()
+        query = select(AttendanceRecord).where(
+            and_(
+                AttendanceRecord.session_id == session_id,
+                AttendanceRecord.student_id == student_id,
+            )
+        )
+        existing = (await db.execute(query)).scalars().first()
+
+        if existing:
+            existing.status = status
+            existing.source = "MANUAL"
+            existing.remarks = remarks
+            existing.marked_by_user_id = user_id
+            existing.updated_at = now
+            await db.commit()
+            await db.refresh(existing)
+            return cls._serialize_record(existing, student)
+
+        new_rec = AttendanceRecord(
+            session_id=session_id,
+            student_id=student_id,
+            status=status,
+            source="MANUAL",
+            first_seen=now,
+            last_seen=now,
+            confidence=1.0,
+            remarks=remarks,
+            marked_by_user_id=user_id,
+        )
+        db.add(new_rec)
+        await db.commit()
+        await db.refresh(new_rec)
+        return cls._serialize_record(new_rec, student)
 
     @classmethod
     async def get_session_records(
@@ -390,6 +521,7 @@ class AttendanceService:
         present = sum(1 for r in records if r.status in ["PRESENT", "MANUAL_PRESENT"])
         late = sum(1 for r in records if r.status == "LATE")
         absent = sum(1 for r in records if r.status in ["ABSENT", "MANUAL_ABSENT"])
+        excused = sum(1 for r in records if r.status in ["EXCUSED", "MANUAL_EXCUSED"])
         rate = round((present + late) / total * 100.0, 1) if total > 0 else 0.0
 
         record_responses = [cls._serialize_record(r, student) for r in records]
@@ -400,6 +532,7 @@ class AttendanceService:
             present_sessions=present,
             late_sessions=late,
             absent_sessions=absent,
+            excused_sessions=excused,
             attendance_rate_pct=rate,
             records=record_responses,
         )
@@ -414,6 +547,7 @@ class AttendanceService:
             student_code=student.student_code if student else "N/A",
             roll_number=student.roll_number if student else "N/A",
             status=record.status,
+            source=record.source or "AI",
             confidence=record.confidence,
             first_seen=record.first_seen,
             last_seen=record.last_seen,
@@ -423,4 +557,3 @@ class AttendanceService:
             created_at=record.created_at,
             updated_at=record.updated_at,
         )
-

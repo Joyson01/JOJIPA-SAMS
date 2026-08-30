@@ -4,20 +4,26 @@ from backend.app.api.v1 import (
     audit,
     auth,
     cameras,
+    classes,
+    dashboard,
     health,
     recognition,
     reports,
     stream,
     students,
+    subjects,
     sync,
 )
 
 api_router = APIRouter()
 
 # Mount API sub-routers
+api_router.include_router(dashboard.router)
 api_router.include_router(health.router)
 api_router.include_router(auth.router)
 api_router.include_router(students.router)
+api_router.include_router(subjects.router)
+api_router.include_router(classes.router)
 api_router.include_router(recognition.router)
 api_router.include_router(attendance.router)
 api_router.include_router(reports.router)

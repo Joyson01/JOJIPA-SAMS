@@ -1,15 +1,61 @@
+# Virtual Environments
 .venv/
 venv/
-.insightface/
+ENV/
+env/
+
+# Python Cache & Bytecode
 __pycache__/
 *.py[cod]
-.env
-.pytest_cache/
+*$py.class
+*.pytest_cache/
 .coverage
-data/*.db
-data/students/*
+htmlcov/
+.cache/
+
+# AI Model Caches & Large Weights
+.insightface/
+models/*.onnx
+models/*.engine
+models/*.pt
+models/*.pth
 embeddings/*
+
+# Environment Variables & Secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.cert
+
+# Databases & Runtime Data
+data/*.db
+data/*.sqlite3
+data/students/*
+uploads/*
+logs/*.log
+*.log
+
+# Node & Frontend Build Artifacts
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/.pnpm-store/
+dist/
+build/
+.next/
+.turbo/
+
+# Media & Images (Except test fixtures if explicitly allowed)
+scratch/test_faces/
 *.jpg
 *.jpeg
 *.png
+!src/Test/*.jpg
+!src/Test/*.png
 !.gitkeep
+
+# Operating System Files
+.DS_Store
+Thumbs.db

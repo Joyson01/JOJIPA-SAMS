@@ -1,4 +1,4 @@
-import axios from 'axios';
+import { apiClient } from './api';
 import {
   AttendanceOverridePayload,
   AttendanceRecord,
@@ -6,33 +6,44 @@ import {
   SessionCreatePayload,
 } from '../types/attendance';
 
-const API_BASE = '/api/v1/attendance';
-
-export const fetchSessions = async (status?: string): Promise<AttendanceSession[]> => {
-  const params: Record<string, string> = {};
-  if (status) params.status = status;
-  const response = await axios.get<AttendanceSession[]>(`${API_BASE}/sessions`, { params });
+export const fetchSessions = async (filters?: {
+  class_name?: string;
+  subject?: string;
+  subject_id?: string;
+  status?: string;
+  scheduled_date?: string;
+}): Promise<AttendanceSession[]> => {
+  const response = await apiClient.get<AttendanceSession[]>('/attendance/sessions', {
+    params: filters,
+  });
   return response.data;
 };
 
 export const fetchSessionById = async (sessionId: string): Promise<AttendanceSession> => {
-  const response = await axios.get<AttendanceSession>(`${API_BASE}/sessions/${sessionId}`);
+  const response = await apiClient.get<AttendanceSession>(`/attendance/sessions/${sessionId}`);
   return response.data;
 };
 
 export const createSession = async (payload: SessionCreatePayload): Promise<AttendanceSession> => {
-  const response = await axios.post<AttendanceSession>(`${API_BASE}/sessions`, payload);
+  const response = await apiClient.post<AttendanceSession>('/attendance/sessions', payload);
   return response.data;
 };
 
 export const startSession = async (sessionId: string): Promise<AttendanceSession> => {
-  const response = await axios.put<AttendanceSession>(`${API_BASE}/sessions/${sessionId}/start`);
+  const response = await apiClient.put<AttendanceSession>(`/attendance/sessions/${sessionId}/start`);
   return response.data;
 };
 
-export const closeSession = async (sessionId: string, autoMarkAbsent = true): Promise<AttendanceSession> => {
-  const response = await axios.put<AttendanceSession>(
-    `${API_BASE}/sessions/${sessionId}/close?auto_mark_absent=${autoMarkAbsent}`
+export const closeSession = async (
+  sessionId: string,
+  autoMarkAbsent = true
+): Promise<AttendanceSession> => {
+  const response = await apiClient.put<AttendanceSession>(
+    `/attendance/sessions/${sessionId}/close`,
+    null,
+    {
+      params: { auto_mark_absent: autoMarkAbsent },
+    }
   );
   return response.data;
 };
@@ -41,11 +52,12 @@ export const fetchSessionRecords = async (
   sessionId: string,
   status?: string
 ): Promise<AttendanceRecord[]> => {
-  const params: Record<string, string> = {};
-  if (status) params.status = status;
-  const response = await axios.get<AttendanceRecord[]>(`${API_BASE}/sessions/${sessionId}/records`, {
-    params,
-  });
+  const response = await apiClient.get<AttendanceRecord[]>(
+    `/attendance/sessions/${sessionId}/records`,
+    {
+      params: status ? { status } : undefined,
+    }
+  );
   return response.data;
 };
 
@@ -53,10 +65,26 @@ export const overrideRecord = async (
   recordId: string,
   payload: AttendanceOverridePayload
 ): Promise<AttendanceRecord> => {
-  const response = await axios.put<AttendanceRecord>(
-    `${API_BASE}/records/${recordId}/override`,
+  const response = await apiClient.put<AttendanceRecord>(
+    `/attendance/records/${recordId}/override`,
     payload
   );
   return response.data;
 };
 
+export const markManualAttendance = async (
+  sessionId: string,
+  studentId: string,
+  status: string,
+  remarks?: string
+): Promise<AttendanceRecord> => {
+  const response = await apiClient.post<AttendanceRecord>('/attendance/manual', null, {
+    params: {
+      session_id: sessionId,
+      student_id: studentId,
+      status,
+      remarks: remarks || 'Manual Attendance',
+    },
+  });
+  return response.data;
+};

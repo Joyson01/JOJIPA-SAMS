@@ -2,6 +2,7 @@ import React from 'react';
 import {
   LayoutDashboard,
   Users,
+  BookOpen,
   Camera,
   Video,
   CheckSquare,
@@ -19,6 +20,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab }) => 
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'students', label: 'Students', icon: Users },
+    { id: 'subjects', label: 'Subjects', icon: BookOpen },
     { id: 'enrollment', label: 'Enrollment', icon: Camera },
     { id: 'live', label: 'Live Attendance', icon: Video },
     { id: 'attendance', label: 'Attendance', icon: CheckSquare },
