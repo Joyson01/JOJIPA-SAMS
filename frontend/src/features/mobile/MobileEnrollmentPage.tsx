@@ -296,11 +296,11 @@ export const MobileEnrollmentPage: React.FC = () => {
       {/* Top Header */}
       <div className="flex items-center justify-between border-b border-slate-800 pb-3">
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-xs">
-            S
+          <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center font-bold text-xs text-white">
+            JS
           </div>
           <div>
-            <h1 className="font-bold text-sm leading-none">SAMS</h1>
+            <h1 className="font-bold text-sm leading-none">JOJIPA-SAMS</h1>
             <p className="text-[10px] text-slate-400">Mobile Face Enrollment</p>
           </div>
         </div>

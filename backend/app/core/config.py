@@ -5,7 +5,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "SAMS Mark-2 AI Face Attendance Management System"
+    PROJECT_NAME: str = "JOJIPA-SAMS — Smart Attendance Management System"
     VERSION: str = "1.0.0"
     API_V1_STR: str = "/api/v1"
     ENVIRONMENT: str = "development"

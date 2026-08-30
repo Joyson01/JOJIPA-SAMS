@@ -1,19 +1,21 @@
-# SAMS — Smart Attendance Management System
+# JOJIPA-SAMS — Smart Attendance Management System
+
 ## Comprehensive Engineering Project Report & Architecture Specification
 
 ---
 
 ## 1. Executive Summary
 
-The **Smart Attendance Management System (SAMS)** is an enterprise-grade, automated artificial intelligence attendance management platform built specifically for academic universities and educational institutions. Traditional classroom attendance models—such as manual paper roll-calls, sign-in sheets, and proximity RFID badges—suffer from systemic inefficiencies including proxy attendance (buddy punching), lost instructional time (5–15 minutes per lecture), manual data-entry errors, and lack of real-time auditing.
+The **JOJIPA-SAMS (Smart Attendance Management System)** is an enterprise-grade, automated artificial intelligence attendance management platform built specifically for academic universities and educational institutions. Traditional classroom attendance models—such as manual paper roll-calls, sign-in sheets, and proximity RFID badges—suffer from systemic inefficiencies including proxy attendance (buddy punching), lost instructional time (5–15 minutes per lecture), manual data-entry errors, and lack of real-time auditing.
 
-SAMS resolves these challenges by integrating advanced computer vision and deep learning pipelines with a resilient, reactive web and mobile application architecture. The platform performs real-time multi-person face detection (SCRFD), facial landmark alignment (5-point affine transformation), deep feature embedding extraction (ArcFace ResNet-50 producing 512-dimensional unit vectors), multi-target temporal tracking (ByteTrack with Kalman filtering), passive multi-frequency texture liveness verification, and atomic 1-time attendance marking with continuous presence tracking.
+**JOJIPA-SAMS** resolves these challenges by integrating advanced computer vision and deep learning pipelines with a resilient, reactive web and mobile application architecture. The platform performs real-time multi-person face detection (SCRFD), facial landmark alignment (5-point affine transformation), deep feature embedding extraction (ArcFace ResNet-50 producing 512-dimensional unit vectors), multi-target temporal tracking (ByteTrack with Kalman filtering), passive multi-frequency texture liveness verification, and atomic 1-time attendance marking with continuous presence tracking.
 
 ---
 
 ## 2. Problem Statement
 
 Higher education institutions face critical operational challenges in attendance tracking:
+
 1. **Instructional Time Wastage:** In classes of 40–120 students, manual roll-calling consumes 10–20% of every lecture hour.
 2. **Proxy Attendance & Fraud:** Sign-in sheets and RFID keycards are easily passed between students, compromising attendance integrity.
 3. **Delayed Action on Absenteeism:** Manual attendance records are typically compiled weeks late, preventing timely academic counselling for at-risk students.
@@ -24,6 +26,7 @@ Higher education institutions face critical operational challenges in attendance
 ## 3. Proposed Solution
 
 SAMS replaces manual processes and fixed door scanners with an intelligent, multi-source visual attendance system:
+
 - **Zero In-Class Overhead:** A classroom webcam, RTSP IP camera, or wireless smartphone placed at the front of the hall scans the room automatically.
 - **Continuous Presence Tracking:** The system distinguishes between initial identity verification and ongoing student presence.
 - **Strict Deduplication:** Attendance is marked exactly ONCE per student per session, while presence states (`PRESENT_AND_VISIBLE`, `TEMPORARILY_NOT_VISIBLE`, `LEFT`, `RETURNED`) update continuously.
@@ -209,6 +212,7 @@ Video Frame ──► [1. Detection: SCRFD] ──► [2. Quality & Pose Filter]
 ## 11. Face Recognition
 
 Recognition leverages in-memory cosine vector index structures synchronized with the relational database. When a frame is ingested:
+
 - Each detected face is aligned and embedded into 512 dimensions.
 - The embedding is compared against all enrolled templates in the active class section.
 - If the highest match similarity exceeds the threshold ($0.65$) and the margin between the top match and second-best candidate exceeds $0.10$, the identity is marked `KNOWN`. If two candidates have nearly identical scores, the match is classified as `UNCERTAIN` to prevent identity confusion.
@@ -218,6 +222,7 @@ Recognition leverages in-memory cosine vector index structures synchronized with
 ## 12. Partial Occlusion Handling
 
 SAMS addresses classroom occlusions (such as medical face masks, scarves, and glasses):
+
 - The 5-point landmark detector isolates unoccluded regions (periocular eye and forehead regions).
 - ArcFace ResNet-50 feature maps retain distinct geometric signatures even when the lower mouth/jaw is partially occluded.
 - When lower-face occlusion is detected, the temporal consensus buffer temporarily increases required consecutive frames from 3 to 5 to ensure statistical confidence before confirming attendance.
@@ -227,6 +232,7 @@ SAMS addresses classroom occlusions (such as medical face masks, scarves, and gl
 ## 13. Temporal Verification
 
 Single-frame recognition is inherently vulnerable to motion blur, temporary lighting shifts, and glancing angles. SAMS implements a rolling **Temporal Consensus Verifier**:
+
 - A deque buffer of length $W = 5$ frames is maintained per active track ID.
 - Each frame votes on candidate identity $\{S_1, S_2, \dots, \text{UNKNOWN}\}$.
 - Identity confirmation requires:
@@ -241,17 +247,18 @@ SAMS enforces a strict three-tier lifecycle model:
 
 $$\text{Recognition} \neq \text{Presence} \neq \text{Attendance}$$
 
-| Stage | Execution Frequency | Database Impact | Description |
-|---|---|---|---|
-| **Recognition** | Continuous (Every video frame) | Zero database writes | Bounding box rendering, visual feedback, live stream UI pills. |
-| **Presence** | Continuous (State transitions) | In-Memory / Audit events | Tracks if student is `VISIBLE`, `TEMPORARILY_NOT_VISIBLE`, or `LEFT`. |
-| **Attendance** | **Exactly ONCE per session** | **1 Database Row** | Creates the permanent attendance record (`PRESENT` or `LATE`). |
+| Stage           | Execution Frequency            | Database Impact          | Description                                                           |
+| --------------- | ------------------------------ | ------------------------ | --------------------------------------------------------------------- |
+| **Recognition** | Continuous (Every video frame) | Zero database writes     | Bounding box rendering, visual feedback, live stream UI pills.        |
+| **Presence**    | Continuous (State transitions) | In-Memory / Audit events | Tracks if student is `VISIBLE`, `TEMPORARILY_NOT_VISIBLE`, or `LEFT`. |
+| **Attendance**  | **Exactly ONCE per session**   | **1 Database Row**       | Creates the permanent attendance record (`PRESENT` or `LATE`).        |
 
 ---
 
 ## 15. Mobile Camera Architecture
 
 SAMS enables any smartphone to operate as an untethered HD classroom camera:
+
 1. **Pairing Token Generation:** Admin clicks "Add Mobile Camera" on the desktop dashboard, generating a cryptographically random pairing token:
    $$\text{Token} = \text{secrets.token\_urlsafe}(16)$$
 2. **QR Code Scanning:** The smartphone camera scans the desktop QR code, opening `https://<HOST_IP>:5173/mobile-camera?token=...`.
@@ -262,18 +269,19 @@ SAMS enables any smartphone to operate as an untethered HD classroom camera:
 
 ## 16. Camera Infrastructure
 
-| Camera Type | Ingestion Protocol | Supported Capabilities |
-|---|---|---|
-| **USB / Integrated Webcam** | Browser Web Media API | Real-time 30 FPS, zero-latency classroom scanning. |
-| **Mobile Smartphone** | HTTPS Token-Paired HTTP Post | Cordless flexibility, adjustable angle, HD resolution. |
-| **RTSP IP Camera** | OpenCV `VideoCapture` Daemon | Continuous background streaming for permanent ceiling cameras. |
-| **Pre-recorded Video** | File Buffer Ingestion | Offline batch verification and algorithm benchmarking. |
+| Camera Type                 | Ingestion Protocol           | Supported Capabilities                                         |
+| --------------------------- | ---------------------------- | -------------------------------------------------------------- |
+| **USB / Integrated Webcam** | Browser Web Media API        | Real-time 30 FPS, zero-latency classroom scanning.             |
+| **Mobile Smartphone**       | HTTPS Token-Paired HTTP Post | Cordless flexibility, adjustable angle, HD resolution.         |
+| **RTSP IP Camera**          | OpenCV `VideoCapture` Daemon | Continuous background streaming for permanent ceiling cameras. |
+| **Pre-recorded Video**      | File Buffer Ingestion        | Offline batch verification and algorithm benchmarking.         |
 
 ---
 
 ## 17. Subject, Class, and Session Data Model
 
 Academic structures are modeled as first-class relational entities:
+
 - **`Subject` Entity:** `id`, `code` (Unique e.g. `CS401`), `name`, `department`, `credits`, `semester`, `academic_year`, `status` (`ACTIVE`/`INACTIVE`).
 - **`ClassSection` Entity:** `id`, `name` (Unique e.g. `CSE-4A`), `department`, `year`, `semester`, `section`, `academic_year`, `status`.
 - **`AttendanceSession` Entity:** `id`, `session_code` (Unique), `subject_id` (FK), `class_id` (FK), `room`, `scheduled_date`, `start_time`, `end_time`, `late_threshold_minutes`, `attendance_mode`, `status` (`SCHEDULED`, `ACTIVE`, `COMPLETED`, `CANCELLED`).
@@ -357,30 +365,31 @@ CREATE TABLE attendance_records (
 
 All endpoints follow RESTful standards under `/api/v1`:
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/v1/dashboard/summary` | Consolidated real-time metrics, active session, trend, cameras, and activity. |
-| `GET` | `/api/v1/health` | Service health, database latency, uptime. |
-| `GET/POST` | `/api/v1/students` | Student registration, pagination, and multi-field search. |
-| `POST` | `/api/v1/students/{id}/enroll` | Multi-pose face biometric capture and embedding storage. |
-| `GET/POST` | `/api/v1/subjects` | Academic subject CRUD with unique code validation. |
-| `GET/POST` | `/api/v1/classes` | Class section CRUD and student count aggregation. |
-| `GET/POST` | `/api/v1/attendance/sessions` | Attendance session scheduling and conflict detection. |
-| `PUT` | `/api/v1/attendance/sessions/{id}/start` | Activate live session for recognition. |
-| `PUT` | `/api/v1/attendance/sessions/{id}/close` | Finalize session and auto-mark absentees. |
-| `POST` | `/api/v1/attendance/sessions/{id}/mark` | Atomic attendance marking with deduplication. |
-| `PUT` | `/api/v1/attendance/records/{id}/override`| Manual override with audit trail recording. |
-| `GET/POST` | `/api/v1/cameras` | Camera device management and diagnostic tests. |
-| `POST` | `/api/v1/cameras/mobile-pairing` | Generate secure mobile QR pairing token. |
-| `POST` | `/api/v1/cameras/mobile-frame` | Ingest video frame from paired smartphone. |
-| `GET` | `/api/v1/reports/analytics` | Institutional attendance rates and defaulter summaries. |
-| `GET` | `/api/v1/reports/export/csv` | Download RFC-4180 compliant attendance CSV. |
+| Method     | Endpoint                                   | Description                                                                   |
+| ---------- | ------------------------------------------ | ----------------------------------------------------------------------------- |
+| `GET`      | `/api/v1/dashboard/summary`                | Consolidated real-time metrics, active session, trend, cameras, and activity. |
+| `GET`      | `/api/v1/health`                           | Service health, database latency, uptime.                                     |
+| `GET/POST` | `/api/v1/students`                         | Student registration, pagination, and multi-field search.                     |
+| `POST`     | `/api/v1/students/{id}/enroll`             | Multi-pose face biometric capture and embedding storage.                      |
+| `GET/POST` | `/api/v1/subjects`                         | Academic subject CRUD with unique code validation.                            |
+| `GET/POST` | `/api/v1/classes`                          | Class section CRUD and student count aggregation.                             |
+| `GET/POST` | `/api/v1/attendance/sessions`              | Attendance session scheduling and conflict detection.                         |
+| `PUT`      | `/api/v1/attendance/sessions/{id}/start`   | Activate live session for recognition.                                        |
+| `PUT`      | `/api/v1/attendance/sessions/{id}/close`   | Finalize session and auto-mark absentees.                                     |
+| `POST`     | `/api/v1/attendance/sessions/{id}/mark`    | Atomic attendance marking with deduplication.                                 |
+| `PUT`      | `/api/v1/attendance/records/{id}/override` | Manual override with audit trail recording.                                   |
+| `GET/POST` | `/api/v1/cameras`                          | Camera device management and diagnostic tests.                                |
+| `POST`     | `/api/v1/cameras/mobile-pairing`           | Generate secure mobile QR pairing token.                                      |
+| `POST`     | `/api/v1/cameras/mobile-frame`             | Ingest video frame from paired smartphone.                                    |
+| `GET`      | `/api/v1/reports/analytics`                | Institutional attendance rates and defaulter summaries.                       |
+| `GET`      | `/api/v1/reports/export/csv`               | Download RFC-4180 compliant attendance CSV.                                   |
 
 ---
 
 ## 20. Frontend Architecture
 
 The frontend is built with **React 18, TypeScript, Tailwind CSS, and Vite**:
+
 - **Component Hierarchy:** Modular feature-based structure (`features/attendance`, `features/subjects`, `features/students`, `features/enrollment`, `features/live`, `features/cameras`, `features/reports`).
 - **State Management:** Local React hooks with asynchronous API service clients and defensive error boundaries.
 - **Real-Time Polling:** Dashboard automatically polls `/api/v1/dashboard/summary` every 8 seconds when active.
@@ -391,6 +400,7 @@ The frontend is built with **React 18, TypeScript, Tailwind CSS, and Vite**:
 ## 21. Backend Architecture
 
 The backend is built with **FastAPI, SQLAlchemy 2.0 (AsyncIO), and Pydantic v2**:
+
 - **Asynchronous Execution:** Async database transactions with connection pooling.
 - **Service Layer Pattern:** Clean separation between API controllers (`api/v1/`), business logic services (`services/`), and data models (`models/`).
 - **Structured JSON Logging:** Uniform log formatting with correlation tracking.
@@ -418,6 +428,7 @@ The backend is built with **FastAPI, SQLAlchemy 2.0 (AsyncIO), and Pydantic v2**
 ## 24. Offline & Synchronization Architecture
 
 SAMS includes an edge synchronization queue (`SyncQueue`) for distributed deployments:
+
 - Edge nodes record attendance events locally during network outages.
 - When network connectivity is restored, events are pushed in batches to `/api/v1/sync/batch-push`.
 - The synchronization service applies idempotent upserts using `event_uuid` to ensure that network retries never create duplicate attendance records.
@@ -435,24 +446,26 @@ SAMS includes an edge synchronization queue (`SyncQueue`) for distributed deploy
 
 ## 26. Technology Stack
 
-| Layer | Technologies |
-|---|---|
-| **Frontend** | React 18, TypeScript, Tailwind CSS, Lucide Icons, Vite |
-| **Backend** | FastAPI, Python 3.10+, Uvicorn, Pydantic v2, PyJWT, Bcrypt |
-| **Computer Vision / AI** | InsightFace, SCRFD-10G, ArcFace (ResNet-50), OpenCV, ONNX Runtime |
-| **Database** | PostgreSQL 16 + pgvector / SQLite (aiosqlite for local dev), SQLAlchemy 2.0 |
-| **Containerization** | Docker, Docker Compose |
+| Layer                    | Technologies                                                                |
+| ------------------------ | --------------------------------------------------------------------------- |
+| **Frontend**             | React 18, TypeScript, Tailwind CSS, Lucide Icons, Vite                      |
+| **Backend**              | FastAPI, Python 3.10+, Uvicorn, Pydantic v2, PyJWT, Bcrypt                  |
+| **Computer Vision / AI** | InsightFace, SCRFD-10G, ArcFace (ResNet-50), OpenCV, ONNX Runtime           |
+| **Database**             | PostgreSQL 16 + pgvector / SQLite (aiosqlite for local dev), SQLAlchemy 2.0 |
+| **Containerization**     | Docker, Docker Compose                                                      |
 
 ---
 
 ## 27. Installation & Execution
 
 ### 1. Prerequisites
+
 - Python 3.10+
 - Node.js 18+ & pnpm
 - Webcam or Smartphone
 
 ### 2. Setup Commands
+
 ```bash
 # Clone Repository
 git clone https://github.com/Joyson01/SAMS.git
@@ -472,6 +485,7 @@ cd ..
 ```
 
 ### 3. Running Services
+
 ```bash
 # Terminal 1: Start FastAPI Backend Server
 python -m uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
@@ -486,6 +500,7 @@ pnpm run dev --host 0.0.0.0 --port 5173
 ## 28. Testing Strategy
 
 SAMS employs a multi-tiered testing strategy:
+
 1. **Unit Tests:** Isolated testing of mathematical modules (vector cosine similarity, Kalman filters, pose estimators, quality analyzers, liveness checkers).
 2. **Service Layer Tests:** Verification of database transactions, duplicate prevention, and presence transitions.
 3. **Integration API Tests:** FastAPI HTTP client testing for all REST endpoints.
@@ -632,4 +647,4 @@ tests/unit/test_temporal_verifier.py::test_temporal_verifier_handles_occluded_fr
 
 ## 33. Conclusion
 
-SAMS successfully delivers an automated, high-precision Face Attendance Management System tailored for modern academic institutions. By replacing error-prone manual roll calls with an intelligent computer vision pipeline and an intuitive web dashboard, SAMS ensures complete attendance integrity, eliminates proxy marking, and recovers valuable instructional time.
+**JOJIPA-SAMS** successfully delivers an automated, high-precision Face Attendance Management System tailored for modern academic institutions. By replacing error-prone manual roll calls with an intelligent computer vision pipeline and an intuitive web dashboard, **JOJIPA-SAMS** ensures complete attendance integrity, eliminates proxy marking, and recovers valuable instructional time.
