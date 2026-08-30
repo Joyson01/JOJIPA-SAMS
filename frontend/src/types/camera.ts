@@ -2,7 +2,7 @@ export interface CameraDevice {
   id: string;
   name: string;
   location: string;
-  source_type: 'WEBCAM' | 'MOBILE' | 'RTSP' | 'VIDEO_FILE';
+  source_type: 'WEBCAM' | 'MOBILE' | 'RTSP';
   device_id?: string | null;
   stream_url?: string | null;
   status: 'CONNECTED' | 'STREAMING' | 'RECONNECTING' | 'NO_FRAME' | 'OFFLINE' | 'ERROR';

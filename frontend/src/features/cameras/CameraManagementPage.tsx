@@ -12,8 +12,6 @@ import {
   Edit2,
   QrCode,
   Radio,
-  FileVideo,
-  Upload,
   Globe,
   Check,
   ShieldAlert,
@@ -27,7 +25,6 @@ import {
   testRegisteredCamera,
   testCameraConnection,
   discoverONVIFCameras,
-  uploadVideoFile,
   revokeMobilePairing,
 } from '../../services/cameraApi';
 import {
@@ -67,10 +64,6 @@ export const CameraManagementPage: React.FC = () => {
   // ONVIF Discovery State
   const [discoveringOnvif, setDiscoveringOnvif] = useState<boolean>(false);
   const [onvifCameras, setOnvifCameras] = useState<ONVIFDiscoveredCamera[]>([]);
-
-  // Video File Upload State
-  const [uploadingVideo, setUploadingVideo] = useState<boolean>(false);
-  const [uploadedVideoName, setUploadedVideoName] = useState<string>('');
 
   // Physical webcams discovered on host
   const [physicalWebcams, setPhysicalWebcams] = useState<PhysicalWebcam[]>([]);
@@ -194,27 +187,6 @@ export const CameraManagementPage: React.FC = () => {
     }
   };
 
-  // Handle Video Upload
-  const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setUploadingVideo(true);
-    try {
-      const res = await uploadVideoFile(file);
-      setUploadedVideoName(file.name);
-      setFormData((prev) => ({
-        ...prev,
-        stream_url: res.file_path,
-        name: prev.name || `Test Video - ${file.name}`,
-      }));
-    } catch (err: any) {
-      alert(err.response?.data?.detail || 'Failed to upload video file.');
-    } finally {
-      setUploadingVideo(false);
-    }
-  };
-
   // Run ONVIF Network Discovery
   const handleDiscoverOnvif = async () => {
     setDiscoveringOnvif(true);
@@ -261,7 +233,7 @@ export const CameraManagementPage: React.FC = () => {
 
   // Revoke Mobile Pairing
   const handleRevokePairing = async (cam: CameraDevice) => {
-    if (window.confirm(`Revoke wireless pairing for ${cam.name}?`)) {
+    if (window.confirm(`Revoke wireless pairing for "${cam.name}"?`)) {
       try {
         await revokeMobilePairing(cam.id);
         loadData();
@@ -273,7 +245,7 @@ export const CameraManagementPage: React.FC = () => {
 
   // Handle Delete Camera
   const handleDelete = async (cam: CameraDevice) => {
-    if (window.confirm(`Are you sure you want to delete camera ${cam.name}?`)) {
+    if (window.confirm(`Are you sure you want to delete camera "${cam.name}"?`)) {
       try {
         await deleteCamera(cam.id);
         loadData();
@@ -321,7 +293,7 @@ export const CameraManagementPage: React.FC = () => {
         <div>
           <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Camera Infrastructure</h1>
           <p className="text-sm text-slate-500 mt-0.5">
-            Unified multi-source ingestion: USB Webcams, Mobile Stations, CCTV / RTSP, and Video Feeds.
+            Physical live camera sources: USB Webcams, Wireless Smartphone Stations, and CCTV / RTSP Streams.
           </p>
         </div>
 
@@ -339,7 +311,6 @@ export const CameraManagementPage: React.FC = () => {
               setPairingMode(false);
               setQrDataUrl(null);
               setFormTestResult(null);
-              setUploadedVideoName('');
               setFormData({
                 name: '',
                 location: '',
@@ -401,8 +372,6 @@ export const CameraManagementPage: React.FC = () => {
                           <Smartphone className="w-4 h-4 text-blue-600" />
                         ) : cam.source_type === 'RTSP' ? (
                           <Radio className="w-4 h-4 text-purple-600" />
-                        ) : cam.source_type === 'VIDEO_FILE' ? (
-                          <FileVideo className="w-4 h-4 text-amber-600" />
                         ) : (
                           <Video className="w-4 h-4 text-emerald-600" />
                         )}
@@ -562,7 +531,7 @@ export const CameraManagementPage: React.FC = () => {
               </button>
             </div>
 
-            {/* Reusable Multi-Source Camera Preview */}
+            {/* Reusable Camera Preview */}
             <CameraPreview camera={selectedCamera} />
 
             {/* Metrics */}
@@ -692,7 +661,7 @@ export const CameraManagementPage: React.FC = () => {
         </div>
       )}
 
-      {/* Modal: Register Camera (4 Source Types) */}
+      {/* Modal: Register Camera (3 Physical Source Types ONLY) */}
       {isAddModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] overflow-y-auto">
@@ -731,14 +700,14 @@ export const CameraManagementPage: React.FC = () => {
               </div>
             ) : (
               <form onSubmit={handleCreate} className="space-y-4 text-xs">
-                {/* 4-Tab Source Selector */}
+                {/* 3-Tab Physical Source Selector */}
                 <div className="space-y-1.5">
                   <label className="font-semibold text-slate-700">1. Select Camera Source</label>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div className="grid grid-cols-3 gap-2">
                     <button
                       type="button"
                       onClick={() => setFormData({ ...formData, source_type: 'WEBCAM', stream_url: '0' })}
-                      className={`p-2.5 rounded-xl border text-center flex flex-col items-center gap-1.5 transition ${
+                      className={`p-3 rounded-xl border text-center flex flex-col items-center gap-1.5 transition ${
                         formData.source_type === 'WEBCAM'
                           ? 'border-blue-500 bg-blue-50 text-blue-700 font-bold shadow-sm'
                           : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
@@ -751,20 +720,20 @@ export const CameraManagementPage: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => setFormData({ ...formData, source_type: 'MOBILE', stream_url: 'mobile://qr' })}
-                      className={`p-2.5 rounded-xl border text-center flex flex-col items-center gap-1.5 transition ${
+                      className={`p-3 rounded-xl border text-center flex flex-col items-center gap-1.5 transition ${
                         formData.source_type === 'MOBILE'
                           ? 'border-blue-500 bg-blue-50 text-blue-700 font-bold shadow-sm'
                           : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
                       }`}
                     >
                       <Smartphone className="w-4 h-4" />
-                      <span>Mobile QR</span>
+                      <span>Mobile Phone</span>
                     </button>
 
                     <button
                       type="button"
                       onClick={() => setFormData({ ...formData, source_type: 'RTSP', stream_url: '' })}
-                      className={`p-2.5 rounded-xl border text-center flex flex-col items-center gap-1.5 transition ${
+                      className={`p-3 rounded-xl border text-center flex flex-col items-center gap-1.5 transition ${
                         formData.source_type === 'RTSP'
                           ? 'border-blue-500 bg-blue-50 text-blue-700 font-bold shadow-sm'
                           : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
@@ -772,19 +741,6 @@ export const CameraManagementPage: React.FC = () => {
                     >
                       <Radio className="w-4 h-4" />
                       <span>CCTV / RTSP</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setFormData({ ...formData, source_type: 'VIDEO_FILE', stream_url: '' })}
-                      className={`p-2.5 rounded-xl border text-center flex flex-col items-center gap-1.5 transition ${
-                        formData.source_type === 'VIDEO_FILE'
-                          ? 'border-blue-500 bg-blue-50 text-blue-700 font-bold shadow-sm'
-                          : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                      }`}
-                    >
-                      <FileVideo className="w-4 h-4" />
-                      <span>Video File</span>
                     </button>
                   </div>
                 </div>
@@ -828,29 +784,6 @@ export const CameraManagementPage: React.FC = () => {
                         onChange={(e) => setFormData({ ...formData, stream_url: e.target.value })}
                         className="w-full bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs font-mono text-slate-900 focus:bg-white focus:outline-none focus:border-blue-500"
                       />
-                    </div>
-                  )}
-
-                  {formData.source_type === 'VIDEO_FILE' && (
-                    <div className="space-y-2">
-                      <label className="font-medium text-slate-600">Upload Test Video (MP4 / AVI)</label>
-                      <div className="flex items-center gap-2">
-                        <label className="cursor-pointer inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold border border-slate-200">
-                          <Upload className="w-3.5 h-3.5" />
-                          <span>{uploadingVideo ? 'Uploading...' : 'Choose File'}</span>
-                          <input
-                            type="file"
-                            accept="video/mp4,video/avi,video/mkv,video/webm"
-                            onChange={handleVideoUpload}
-                            className="hidden"
-                          />
-                        </label>
-                        {uploadedVideoName && (
-                          <span className="text-xs font-mono text-emerald-600 truncate max-w-[200px]">
-                            ✓ {uploadedVideoName}
-                          </span>
-                        )}
-                      </div>
                     </div>
                   )}
 

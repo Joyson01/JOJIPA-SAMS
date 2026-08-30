@@ -33,6 +33,8 @@ embeddings/*
 data/*.db
 data/*.sqlite3
 data/students/*
+data/uploads/*
+data/uploads/media/*
 uploads/*
 logs/
 *.log

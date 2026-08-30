@@ -207,7 +207,7 @@ class Camera(Base):
     id: Mapped[str] = mapped_column(GUID, primary_key=True, default=generate_uuid)
     name: Mapped[str] = mapped_column(String(64), nullable=False)
     location: Mapped[str] = mapped_column(String(128), nullable=False)
-    source_type: Mapped[str] = mapped_column(String(32), default="WEBCAM", nullable=False)  # WEBCAM, MOBILE, RTSP, VIDEO_FILE
+    source_type: Mapped[str] = mapped_column(String(32), default="WEBCAM", nullable=False)  # WEBCAM, MOBILE, RTSP
     device_id: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)  # Physical hardware device ID
     stream_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="OFFLINE", nullable=False)  # CONNECTED, STREAMING, RECONNECTING, NO_FRAME, OFFLINE, ERROR
@@ -305,4 +305,37 @@ class SyncQueue(Base):
     last_error: Mapped[Optional[Text]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
     synced_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class MediaProcessingJob(Base):
+    __tablename__ = "media_processing_jobs"
+
+    id: Mapped[str] = mapped_column(GUID, primary_key=True, default=generate_uuid)
+    session_id: Mapped[str] = mapped_column(GUID, ForeignKey("attendance_sessions.id", ondelete="CASCADE"), index=True, nullable=False)
+    media_type: Mapped[str] = mapped_column(String(16), nullable=False)  # IMAGE, VIDEO
+    filename: Mapped[str] = mapped_column(String(256), nullable=False)
+    file_path: Mapped[str] = mapped_column(String(512), nullable=False)
+    file_size_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    duration_sec: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    resolution: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="QUEUED", index=True, nullable=False)  # QUEUED, PROCESSING, COMPLETED, FAILED, CANCELLED
+    progress_pct: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    frames_total: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    frames_processed: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    faces_detected_total: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    recognized_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    unknown_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    uncertain_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    attendance_marked_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    summary_json: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON_TYPE, nullable=True)
+    error_message: Mapped[Optional[Text]] = mapped_column(Text, nullable=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now, nullable=False)
+
+    # Relationships
+    session = relationship("AttendanceSession")
+
 

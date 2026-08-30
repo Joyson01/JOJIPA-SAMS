@@ -269,32 +269,6 @@ async def get_camera_mjpeg_stream(
     )
 
 
-@router.post(
-    "/upload-video",
-    summary="Upload Video File for Test Camera",
-    description="Uploads a local MP4/AVI video file to use as a simulated CCTV camera source for offline recognition debugging.",
-)
-async def upload_test_video(
-    file: UploadFile = File(...),
-):
-    allowed_exts = {".mp4", ".avi", ".mkv", ".mov", ".webm"}
-    ext = Path(file.filename or "video.mp4").suffix.lower()
-    if ext not in allowed_exts:
-        raise HTTPException(status_code=400, detail=f"Unsupported video format. Allowed: {sorted(allowed_exts)}")
-
-    upload_dir = Path("data/uploads/videos")
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    target_path = upload_dir / f"test_feed_{Path(file.filename or 'video.mp4').name}"
-
-    contents = await file.read()
-    target_path.write_bytes(contents)
-
-    return {
-        "success": True,
-        "filename": target_path.name,
-        "file_path": str(target_path),
-        "source_type": "VIDEO_FILE",
-    }
 
 
 @router.post(

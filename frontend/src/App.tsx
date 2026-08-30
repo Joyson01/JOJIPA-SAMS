@@ -5,6 +5,7 @@ import { StudentListPage } from './features/students/StudentListPage';
 import { FaceEnrollmentPage } from './features/enrollment/FaceEnrollmentPage';
 import { AttendancePage } from './features/attendance/AttendancePage';
 import { LiveDashboardPage } from './features/live/LiveDashboardPage';
+import { MediaAttendancePage } from './features/media/MediaAttendancePage';
 import { ReportsPage } from './features/reports/ReportsPage';
 import { CameraManagementPage } from './features/cameras/CameraManagementPage';
 import { SubjectManagementPage } from './features/subjects/SubjectManagementPage';
@@ -81,6 +82,7 @@ export const App: React.FC = () => {
         />
       )}
       {activeTab === 'live' && <LiveDashboardPage />}
+      {activeTab === 'media' && <MediaAttendancePage />}
       {activeTab === 'attendance' && <AttendancePage />}
       {activeTab === 'cameras' && <CameraManagementPage />}
       {activeTab === 'reports' && <ReportsPage />}

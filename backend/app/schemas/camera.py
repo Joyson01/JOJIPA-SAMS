@@ -6,9 +6,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 class CameraCreate(BaseModel):
     name: str = Field(..., min_length=2, max_length=64, description="Human-readable camera name")
     location: str = Field(..., min_length=2, max_length=128, description="Classroom / Hall / Entryway location")
-    source_type: str = Field("WEBCAM", description="WEBCAM, MOBILE, RTSP, VIDEO_FILE")
+    source_type: str = Field("WEBCAM", description="WEBCAM, MOBILE, RTSP")
     device_id: Optional[str] = Field(None, max_length=256, description="Hardware webcam deviceId from enumerateDevices")
-    stream_url: Optional[str] = Field(None, max_length=512, description="RTSP URL, video file path, or device identifier")
+    stream_url: Optional[str] = Field(None, max_length=512, description="RTSP URL or device identifier")
     target_fps: int = Field(15, ge=1, le=60)
     resolution: str = Field("1280x720")
     assigned_class: Optional[str] = Field(None, max_length=64, description="Class code for auto-selection (e.g. CSE-4A)")
@@ -18,7 +18,7 @@ class CameraCreate(BaseModel):
     @field_validator("source_type")
     @classmethod
     def validate_source_type(cls, v: str) -> str:
-        valid = {"WEBCAM", "MOBILE", "RTSP", "VIDEO_FILE"}
+        valid = {"WEBCAM", "MOBILE", "RTSP"}
         if v.upper() not in valid:
             raise ValueError(f"Invalid source_type '{v}'. Allowed: {sorted(valid)}")
         return v.upper()
