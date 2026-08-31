@@ -34,6 +34,12 @@ class TrackedRecognitionResult:
     votes_count: int
     total_valid_frames: int
     is_occluded: bool
+    provisional_student_id: Optional[str] = None
+    provisional_code: Optional[str] = None
+    provisional_roll: Optional[str] = None
+    provisional_name: Optional[str] = None
+    frames_needed: int = 0
+    confidence_history: List[float] = field(default_factory=list)
     quality: Optional[QualityMetrics] = None
     pose: Optional[PoseEstimate] = None
     decision_reason: str = ""
@@ -228,6 +234,12 @@ class VideoRecognitionPipeline:
                     votes_count=v_res.votes_count,
                     total_valid_frames=v_res.total_valid_frames,
                     is_occluded=False,
+                    provisional_student_id=v_res.provisional_student_id,
+                    provisional_code=v_res.provisional_code,
+                    provisional_roll=v_res.provisional_roll,
+                    provisional_name=v_res.provisional_name,
+                    frames_needed=v_res.frames_needed,
+                    confidence_history=v_res.confidence_history,
                     quality=quality,
                     pose=pose,
                     decision_reason=v_res.reason,

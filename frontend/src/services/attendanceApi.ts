@@ -88,3 +88,89 @@ export const markManualAttendance = async (
   });
   return response.data;
 };
+
+export interface PhotoRecognitionFaceResult {
+  student_id: string | null;
+  name: string;
+  student_name: string;
+  student_code?: string;
+  roll_number?: string;
+  confidence: number;
+  similarity: number;
+  confidence_pct: number;
+  status: 'recognized' | 'already_marked' | 'unknown' | 'low_quality' | string;
+  attendance_marked: boolean;
+  already_present: boolean;
+  rejection_reason?: string;
+  bbox: {
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+    x?: number;
+    y?: number;
+    width?: number;
+    height?: number;
+  };
+}
+
+export interface PhotoRecognitionResponse {
+  success: boolean;
+  faces_detected: number;
+  students_recognized: number;
+  attendance_marked: number;
+  duplicates_skipped: number;
+  unknown_faces: number;
+  results: PhotoRecognitionFaceResult[];
+  annotated_image_url?: string;
+  processing_time_ms?: number;
+}
+
+export const recognizeImageAttendance = async (
+  sessionId: string,
+  imageFileOrBlob: File | Blob,
+  threshold: number = 0.40
+): Promise<PhotoRecognitionResponse> => {
+  const formData = new FormData();
+  formData.append('session_id', sessionId);
+  formData.append('threshold', threshold.toString());
+  if (imageFileOrBlob instanceof File) {
+    formData.append('image', imageFileOrBlob, imageFileOrBlob.name);
+  } else {
+    formData.append('image', imageFileOrBlob, 'captured_photo.jpg');
+  }
+
+  const response = await apiClient.post<PhotoRecognitionResponse>(
+    '/attendance/recognize-frame',
+    formData
+  );
+  return response.data;
+};
+
+export const recognizeFrameAttendance = async (options: {
+  sessionId: string;
+  cameraId?: string;
+  frameUrl?: string;
+  imageFileOrBlob?: File | Blob;
+  threshold?: number;
+}): Promise<PhotoRecognitionResponse> => {
+  const formData = new FormData();
+  formData.append('session_id', options.sessionId);
+  if (options.cameraId) formData.append('camera_id', options.cameraId);
+  if (options.frameUrl) formData.append('frame_url', options.frameUrl);
+  if (options.threshold !== undefined) formData.append('threshold', options.threshold.toString());
+
+  if (options.imageFileOrBlob) {
+    if (options.imageFileOrBlob instanceof File) {
+      formData.append('image', options.imageFileOrBlob, options.imageFileOrBlob.name);
+    } else {
+      formData.append('image', options.imageFileOrBlob, 'captured_frame.jpg');
+    }
+  }
+
+  const response = await apiClient.post<PhotoRecognitionResponse>(
+    '/attendance/recognize-frame',
+    formData
+  );
+  return response.data;
+};

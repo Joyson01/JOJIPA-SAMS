@@ -34,6 +34,12 @@ class TemporalVerificationResult:
     votes_count: int
     total_valid_frames: int
     reason: str
+    provisional_student_id: Optional[str] = None
+    provisional_code: Optional[str] = None
+    provisional_roll: Optional[str] = None
+    provisional_name: Optional[str] = None
+    frames_needed: int = 0
+    confidence_history: List[float] = field(default_factory=list)
 
 
 class TemporalVerifier:
@@ -126,13 +132,17 @@ class TemporalVerifier:
         # Filter valid, unoccluded, live frames
         valid_obs = [o for o in buf if o.is_valid and o.candidate_id is not None]
         total_valid = len(valid_obs)
+        history = [round(o.similarity, 3) for o in buf if o.candidate_id is not None]
 
         # 1. Check if enough valid frames have been accumulated
         if total_valid < self.min_required_frames:
             occluded_count = sum(1 for o in buf if o.is_occluded)
             spoof_count = sum(1 for o in buf if o.liveness_score < self.min_liveness_threshold)
+            frames_needed = max(1, self.min_required_frames - total_valid)
+
+            provisional = valid_obs[-1] if valid_obs else None
             reason = (
-                f"Accumulating evidence: {total_valid}/{self.min_required_frames} clear frames."
+                f"Verifying identity ({total_valid}/{self.min_required_frames} frames). Need {frames_needed} more frame{'s' if frames_needed > 1 else ''}."
             )
             if occluded_count > 0:
                 reason += f" ({occluded_count} frames occluded/held)."
@@ -147,11 +157,17 @@ class TemporalVerifier:
                 confirmed_code=None,
                 confirmed_roll=None,
                 confirmed_name=None,
-                average_similarity=0.0,
-                average_liveness=0.0,
+                average_similarity=round(float(np.mean([o.similarity for o in valid_obs])) if valid_obs else 0.0, 4),
+                average_liveness=round(float(np.mean([o.liveness_score for o in valid_obs])) if valid_obs else 0.0, 3),
                 votes_count=total_valid,
                 total_valid_frames=total_valid,
                 reason=reason,
+                provisional_student_id=provisional.candidate_id if provisional else None,
+                provisional_code=provisional.candidate_code if provisional else None,
+                provisional_roll=provisional.candidate_roll if provisional else None,
+                provisional_name=provisional.candidate_name if provisional else None,
+                frames_needed=frames_needed,
+                confidence_history=history,
             )
 
         # 2. Count identity votes across valid frames
@@ -166,6 +182,7 @@ class TemporalVerifier:
         )
         votes_count = len(top_observations)
         consistency_ratio = votes_count / total_valid
+        representative = top_observations[-1]
 
         # 3. Check Consistency Ratio
         if consistency_ratio < self.min_consistency_ratio:
@@ -177,17 +194,22 @@ class TemporalVerifier:
                 confirmed_code=None,
                 confirmed_roll=None,
                 confirmed_name=None,
-                average_similarity=0.0,
-                average_liveness=0.0,
+                average_similarity=round(float(np.mean([o.similarity for o in top_observations])), 4),
+                average_liveness=round(float(np.mean([o.liveness_score for o in top_observations])), 3),
                 votes_count=votes_count,
                 total_valid_frames=total_valid,
                 reason=f"Inconsistent identity votes ({votes_count}/{total_valid} = {consistency_ratio:.1%} < {self.min_consistency_ratio:.1%}).",
+                provisional_student_id=representative.candidate_id,
+                provisional_code=representative.candidate_code,
+                provisional_roll=representative.candidate_roll,
+                provisional_name=representative.candidate_name,
+                frames_needed=1,
+                confidence_history=history,
             )
 
         # 4. Check Average Similarity and Liveness
         avg_sim = float(np.mean([o.similarity for o in top_observations]))
         avg_liv = float(np.mean([o.liveness_score for o in top_observations]))
-        representative = top_observations[-1]
 
         if avg_sim >= self.min_average_confidence and avg_liv >= self.min_liveness_threshold:
             return TemporalVerificationResult(
@@ -203,21 +225,33 @@ class TemporalVerifier:
                 votes_count=votes_count,
                 total_valid_frames=total_valid,
                 reason=f"Identity confirmed ({votes_count}/{total_valid} frames, avg similarity {avg_sim:.3f} >= {self.min_average_confidence:.3f}, liveness {avg_liv:.2f}).",
+                provisional_student_id=representative.candidate_id,
+                provisional_code=representative.candidate_code,
+                provisional_roll=representative.candidate_roll,
+                provisional_name=representative.candidate_name,
+                frames_needed=0,
+                confidence_history=history,
             )
         else:
             return TemporalVerificationResult(
                 track_id=track_id,
                 decision=DecisionState.UNCERTAIN,
                 is_confirmed=False,
-                confirmed_student_id=top_student_id,
-                confirmed_code=representative.candidate_code,
-                confirmed_roll=representative.candidate_roll,
-                confirmed_name=representative.candidate_name,
+                confirmed_student_id=None,
+                confirmed_code=None,
+                confirmed_roll=None,
+                confirmed_name=None,
                 average_similarity=round(avg_sim, 4),
                 average_liveness=round(avg_liv, 3),
                 votes_count=votes_count,
                 total_valid_frames=total_valid,
-                reason=f"Threshold not met (avg similarity {avg_sim:.3f}, liveness {avg_liv:.2f}).",
+                reason=f"Threshold not met (avg similarity {avg_sim:.3f} < {self.min_average_confidence:.3f}, liveness {avg_liv:.2f}).",
+                provisional_student_id=representative.candidate_id,
+                provisional_code=representative.candidate_code,
+                provisional_roll=representative.candidate_roll,
+                provisional_name=representative.candidate_name,
+                frames_needed=1,
+                confidence_history=history,
             )
 
     def _cleanup_expired_tracks(self, now: float) -> None:

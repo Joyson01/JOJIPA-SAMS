@@ -1,12 +1,21 @@
+import time
+import uuid
+import traceback
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from pathlib import Path
+
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from backend.app.api.v1.router import api_router
 from backend.app.core.config import settings
+from backend.app.core.exceptions import SAMSException
 from backend.app.core.logging import logger, setup_logging
 from backend.app.database.session import check_database_connection, init_db_schema
+from backend.app.services.face_recognition_service import face_recognition_service
 
 
 @asynccontextmanager
@@ -14,6 +23,12 @@ async def lifespan(app: FastAPI):
     # Startup
     setup_logging()
     logger.info(f"Starting {settings.PROJECT_NAME} v{settings.VERSION} [{settings.ENVIRONMENT}]")
+
+    # Initialize Face Recognition Service & Embeddings at Startup
+    logger.info("Initializing InsightFace buffalo_l engine for Media & Real-time Attendance...")
+    _ = face_recognition_service.app
+    emb_count = len(face_recognition_service.load_embeddings(force_reload=True))
+    logger.info(f"InsightFace engine ready with {emb_count} student face embedding(s).")
 
     # Verify DB connectivity & initialize development schema if needed
     db_connected, db_info, latency = await check_database_connection()
@@ -41,18 +56,166 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Configure CORS Middleware
-if settings.BACKEND_CORS_ORIGINS:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=[str(origin) for origin in settings.BACKEND_CORS_ORIGINS],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+# Configure CORS Middleware (allowing LAN mobile browsers and desktop clients)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_origin_regex=r"https?://.*",
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# Request Telemetry & Logging Middleware
+@app.middleware("http")
+async def request_logging_middleware(request: Request, call_next):
+    req_id = uuid.uuid4().hex[:8]
+    request.state.request_id = req_id
+    start_time = time.perf_counter()
+
+    try:
+        response = await call_next(request)
+        elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        response.headers["X-Request-ID"] = req_id
+        response.headers["X-Process-Time-Ms"] = str(elapsed_ms)
+
+        # Skip noisy high-frequency frame polling logs
+        if not request.url.path.endswith("/frame") and not request.url.path.endswith("/preview"):
+            logger.info(
+                f"[{req_id}] {request.method} {request.url.path} -> {response.status_code} ({elapsed_ms}ms)"
+            )
+        return response
+    except Exception as exc:
+        elapsed_ms = round((time.perf_counter() - start_time) * 1000, 2)
+        logger.error(
+            f"[{req_id}] Unhandled error on {request.method} {request.url.path} ({elapsed_ms}ms): {exc}\n{traceback.format_exc()}"
+        )
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "success": False,
+                "error": {
+                    "code": "INTERNAL_SERVER_ERROR",
+                    "message": "An unexpected server error occurred. Please try again or check backend logs.",
+                    "details": [{"request_id": req_id}],
+                },
+            },
+            headers={"X-Request-ID": req_id, "X-Process-Time-Ms": str(elapsed_ms)},
+        )
+
+
+# Global Exception Handlers
+@app.exception_handler(SAMSException)
+async def sams_exception_handler(request: Request, exc: SAMSException):
+    req_id = getattr(request.state, "request_id", uuid.uuid4().hex[:8])
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "success": False,
+            "detail": exc.message,
+            "error": {
+                "code": exc.error_code,
+                "message": exc.message,
+                "details": exc.details if isinstance(exc.details, (list, dict)) else [str(exc.details)],
+            },
+        },
+        headers={"X-Request-ID": req_id},
     )
 
-# Include API v1 Router
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    req_id = getattr(request.state, "request_id", uuid.uuid4().hex[:8])
+    formatted_errors = []
+    for err in exc.errors():
+        loc_str = " -> ".join(str(l) for l in err.get("loc", []) if l not in ["body", "query", "path"])
+        msg = err.get("msg", "Invalid value")
+        formatted_errors.append({"field": loc_str or "payload", "message": msg, "type": err.get("type")})
+
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={
+            "success": False,
+            "detail": "The request payload failed input validation.",
+            "error": {
+                "code": "VALIDATION_ERROR",
+                "message": "The request payload failed input validation.",
+                "details": formatted_errors,
+            },
+        },
+        headers={"X-Request-ID": req_id},
+    )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    req_id = getattr(request.state, "request_id", uuid.uuid4().hex[:8])
+    if isinstance(exc.detail, dict) and "error_code" in exc.detail:
+        err_code = exc.detail.get("error_code", f"HTTP_{exc.status_code}")
+        msg = exc.detail.get("message", str(exc.detail))
+        details = exc.detail.get("details", [])
+    elif isinstance(exc.detail, dict):
+        err_code = exc.detail.get("code", f"HTTP_{exc.status_code}")
+        msg = exc.detail.get("message", exc.detail.get("detail", str(exc.detail)))
+        details = exc.detail.get("details", [])
+    else:
+        err_code = f"HTTP_{exc.status_code}"
+        msg = str(exc.detail)
+        details = []
+
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "success": False,
+            "detail": msg,
+            "error": {
+                "code": err_code,
+                "message": msg,
+                "details": details if isinstance(details, list) else [details],
+            },
+        },
+        headers={"X-Request-ID": req_id},
+    )
+
+
+@app.exception_handler(Exception)
+async def generic_exception_handler(request: Request, exc: Exception):
+    req_id = getattr(request.state, "request_id", uuid.uuid4().hex[:8])
+    logger.error(f"[{req_id}] Unexpected 500 error on {request.method} {request.url.path}: {exc}\n{traceback.format_exc()}")
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "success": False,
+            "detail": "An unexpected server error occurred. Please try again.",
+            "error": {
+                "code": "INTERNAL_SERVER_ERROR",
+                "message": "An unexpected server error occurred. Please try again.",
+                "details": [{"request_id": req_id}],
+            },
+        },
+        headers={"X-Request-ID": req_id},
+    )
+
+
+# Include API v1 Router and /api alias
 app.include_router(api_router, prefix=settings.API_V1_STR)
+if settings.API_V1_STR != "/api":
+    app.include_router(api_router, prefix="/api")
+
+# Mount Static Outputs and Uploads Directories
+_ROOT = Path(__file__).resolve().parent.parent.parent
+_OUTPUTS_DIR = _ROOT / "outputs"
+_UPLOADS_DIR = _ROOT / "data" / "uploads"
+_PROCESSED_DIR = _ROOT / "data" / "uploads" / "media"
+
+_OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+_UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+_PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+
+app.mount("/outputs", StaticFiles(directory=str(_OUTPUTS_DIR)), name="outputs")
+app.mount("/uploads", StaticFiles(directory=str(_UPLOADS_DIR)), name="uploads")
+app.mount("/processed", StaticFiles(directory=str(_PROCESSED_DIR)), name="processed")
 
 
 @app.get("/", tags=["Root"])
@@ -80,4 +243,3 @@ async def root_health():
             "latency_ms": latency_ms,
         },
     }
-

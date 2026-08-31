@@ -3,7 +3,11 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.database.session import get_db
-from backend.app.schemas.recognition import RecognitionResponse, ThresholdsConfig
+from backend.app.schemas.recognition import (
+    AIRecognitionConfig,
+    RecognitionResponse,
+    ThresholdsConfig,
+)
 from backend.app.services.recognition_service import RecognitionService
 
 router = APIRouter(prefix="/recognition", tags=["Face Recognition"])
@@ -13,7 +17,7 @@ router = APIRouter(prefix="/recognition", tags=["Face Recognition"])
     "/process",
     response_model=RecognitionResponse,
     summary="Process Image Frame for Face Recognition",
-    description="Detects all faces, calculates alignment and embeddings, and performs 3-state classification against enrolled students.",
+    description="Detects all faces, calculates alignment and embeddings, and performs multi-stage classification against enrolled students.",
 )
 async def process_recognition_image(
     file: UploadFile = File(..., description="JPEG or PNG image frame"),
@@ -50,7 +54,8 @@ async def process_recognition_image(
 
         if session_id:
             for face in rec_res.faces:
-                if face.decision == "KNOWN" and face.best_match:
+                # Require explicit VERIFIED status (meets high confidence threshold and margin)
+                if face.decision == "KNOWN" and face.best_match and face.status == "VERIFIED":
                     try:
                         await AttendanceService.mark_attendance(
                             db=db,
@@ -59,7 +64,7 @@ async def process_recognition_image(
                                 student_id=face.best_match.student_id,
                                 camera_id=camera_id,
                                 confidence=face.best_match.similarity,
-                                liveness_score=1.0,
+                                liveness_score=face.liveness_score or 1.0,
                                 remarks=f"Live stream ({face.best_match.confidence_pct:.1f}%)",
                             ),
                         )
@@ -91,6 +96,34 @@ async def sync_gallery(
 )
 async def get_thresholds() -> ThresholdsConfig:
     return RecognitionService.get_thresholds()
+
+
+@router.get(
+    "/config",
+    response_model=AIRecognitionConfig,
+    summary="Get Full AI Recognition Configuration",
+    description="Retrieves active thresholds for detection, recognition, temporal verification, tracking, quality, and liveness.",
+)
+async def get_ai_config() -> AIRecognitionConfig:
+    return RecognitionService.get_config()
+
+
+@router.put(
+    "/config",
+    response_model=AIRecognitionConfig,
+    summary="Update AI Recognition Configuration",
+    description="Updates live biometric thresholds and pipelines without server restart.",
+)
+@router.post(
+    "/config",
+    response_model=AIRecognitionConfig,
+    summary="Update AI Recognition Configuration (POST)",
+    description="Updates live biometric thresholds and pipelines without server restart.",
+)
+async def update_ai_config(
+    config: AIRecognitionConfig,
+) -> AIRecognitionConfig:
+    return RecognitionService.set_config(config)
 
 
 @router.post(

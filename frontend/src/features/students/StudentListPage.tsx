@@ -22,6 +22,7 @@ import {
   updateStudent,
   deleteStudent,
 } from '../../services/studentApi';
+import { formatApiErrorMessage } from '../../utils/apiError';
 
 interface StudentListPageProps {
   onNavigate?: (tab: string, studentId?: string) => void;
@@ -160,7 +161,7 @@ export const StudentListPage: React.FC<StudentListPageProps> = ({ onNavigate }) 
         onNavigate('enrollment', created.id);
       }
     } catch (err: any) {
-      setModalError(err.response?.data?.detail?.message || 'Failed to create student.');
+      setModalError(formatApiErrorMessage(err, 'Failed to create student.'));
     } finally {
       setFormSubmitting(false);
     }
@@ -176,7 +177,7 @@ export const StudentListPage: React.FC<StudentListPageProps> = ({ onNavigate }) 
       setIsEditModalOpen(false);
       loadData();
     } catch (err: any) {
-      setModalError(err.response?.data?.detail?.message || 'Failed to update student.');
+      setModalError(formatApiErrorMessage(err, 'Failed to update student.'));
     } finally {
       setFormSubmitting(false);
     }
@@ -190,7 +191,7 @@ export const StudentListPage: React.FC<StudentListPageProps> = ({ onNavigate }) 
       setIsDeleteModalOpen(false);
       loadData();
     } catch (err: any) {
-      alert(err.response?.data?.detail?.message || 'Failed to delete student.');
+      alert(formatApiErrorMessage(err, 'Failed to delete student.'));
     } finally {
       setFormSubmitting(false);
     }

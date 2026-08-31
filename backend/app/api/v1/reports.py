@@ -16,6 +16,12 @@ router = APIRouter(prefix="/reports", tags=["Reporting & Analytics"])
     summary="Get Institutional Attendance Analytics",
     description="Aggregates overall attendance rate, class breakdowns, daily trends, and defaulter student alerts.",
 )
+@router.get(
+    "/summary",
+    response_model=InstitutionAnalyticsResponse,
+    summary="Get Institutional Attendance Analytics Summary Alias",
+    description="Alias endpoint for institutional attendance summary and analytics.",
+)
 async def get_analytics(
     start_date: Optional[date] = Query(None, description="Start date for reporting window"),
     end_date: Optional[date] = Query(None, description="End date for reporting window"),

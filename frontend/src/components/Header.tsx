@@ -1,5 +1,5 @@
 import React from 'react';
-import { User, LogOut, RefreshCw } from 'lucide-react';
+import { User, LogOut, RefreshCw, Menu } from 'lucide-react';
 import { ServiceHealthResponse } from '../types';
 
 interface HeaderProps {
@@ -8,6 +8,7 @@ interface HeaderProps {
   onRefreshHealth: () => void;
   isRefreshing: boolean;
   activeTab: string;
+  onToggleMobileMenu?: () => void;
 }
 
 const TAB_TITLES: Record<string, string> = {
@@ -26,21 +27,31 @@ export const Header: React.FC<HeaderProps> = ({
   onRefreshHealth,
   isRefreshing,
   activeTab,
+  onToggleMobileMenu,
 }) => {
   const isOnline = healthStatus === 'healthy';
 
   return (
-    <header className="h-16 bg-white border-b border-slate-200 px-6 flex items-center justify-between sticky top-0 z-30">
-      {/* Page Title */}
+    <header className="h-16 bg-white border-b border-slate-200 px-4 sm:px-6 flex items-center justify-between sticky top-0 z-30 shadow-xs">
+      {/* Left: Mobile Menu Trigger & Page Title */}
       <div className="flex items-center gap-3">
-        <h2 className="text-base font-semibold text-slate-800">
+        {onToggleMobileMenu && (
+          <button
+            onClick={onToggleMobileMenu}
+            className="md:hidden p-2 rounded-xl text-slate-600 hover:bg-slate-100 transition"
+            title="Open Navigation"
+          >
+            <Menu className="w-5 h-5" />
+          </button>
+        )}
+        <h2 className="text-base font-bold text-slate-800">
           {TAB_TITLES[activeTab] || 'Dashboard'}
         </h2>
       </div>
 
       {/* Right Controls */}
-      <div className="flex items-center gap-4">
-        {/* Subtle Online Status Dot */}
+      <div className="flex items-center gap-2.5 sm:gap-4">
+        {/* Online Status Dot */}
         <button
           onClick={onRefreshHealth}
           disabled={isRefreshing}
@@ -52,14 +63,14 @@ export const Header: React.FC<HeaderProps> = ({
               isOnline ? 'bg-emerald-500' : 'bg-rose-500 animate-pulse'
             }`}
           ></span>
-          <span>{isOnline ? 'System Online' : 'Connecting...'}</span>
+          <span className="hidden sm:inline">{isOnline ? 'System Online' : 'Connecting...'}</span>
           {isRefreshing && <RefreshCw className="w-3 h-3 animate-spin text-slate-400" />}
         </button>
 
-        <div className="h-4 w-px bg-slate-200"></div>
+        <div className="h-4 w-px bg-slate-200 hidden sm:block"></div>
 
         {/* User Profile */}
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-600 font-medium text-xs">
             <User className="w-4 h-4 text-slate-500" />
           </div>

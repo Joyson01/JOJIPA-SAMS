@@ -38,6 +38,14 @@ async def test_media_attendance_api_endpoints(client, test_db_session):
         ),
     )
 
+    # 1b. Test Session Biometric Validation API
+    val_resp = await client.get(f'/api/v1/media-attendance/session-validation/{sess.id}')
+    assert val_resp.status_code == 200
+    val_json = val_resp.json()
+    assert val_json['session_id'] == sess.id
+    assert 'total_enrolled_students' in val_json
+    assert 'can_process' in val_json
+
     # 2. Test Image Diagnostic API (/api/v1/media-attendance/analyze-image)
     img = Image.new('RGB', (100, 100), color='white')
     img_byte_arr = io.BytesIO()
@@ -61,7 +69,20 @@ async def test_media_attendance_api_endpoints(client, test_db_session):
     assert img_json['status'] == 'COMPLETED'
     assert img_json['session_id'] == sess.id
     assert img_json['media_type'] == 'IMAGE'
+    assert 'results' in img_json
+    assert 'faces' in img_json
     job_id = img_json['job_id']
+
+    # 3b. Test Image Attendance via /api alias and sessionId alias
+    files_alias = {'image': ('classroom_alias.jpg', img_bytes, 'image/jpeg')}
+    data_alias = {'sessionId': sess.id}
+    img_alias_resp = await client.post('/api/media-attendance/image', data=data_alias, files=files_alias)
+    assert img_alias_resp.status_code == 200
+    assert img_alias_resp.json()['status'] == 'COMPLETED'
+
+    # 3c. Test missing session ID returns 400 Bad Request
+    bad_resp = await client.post('/api/v1/media-attendance/image', data={}, files=files)
+    assert bad_resp.status_code == 400
 
     # 4. Test List Jobs API
     list_resp = await client.get('/api/v1/media-attendance/jobs')
@@ -75,9 +96,36 @@ async def test_media_attendance_api_endpoints(client, test_db_session):
         assert get_resp.status_code == 200
         assert get_resp.json()['id'] == job_id
 
+        # 5b. Test Get Job Results
+        res_resp = await client.get(f'/api/v1/media-attendance/jobs/{job_id}/results')
+        assert res_resp.status_code == 200
+        assert 'job' in res_resp.json()
+
         # 6. Test Delete Job
         del_resp = await client.delete(f'/api/v1/media-attendance/jobs/{job_id}')
         assert del_resp.status_code == 204
+
+    # 7. Test Photo Capture Recognize Image API (/api/attendance/recognize-image)
+    with open('tests/fixtures/sample_student.jpg', 'rb') as f:
+        sample_bytes = f.read()
+
+    rec_files = {'image': ('capture.jpg', sample_bytes, 'image/jpeg')}
+    rec_data = {'session_id': sess.id}
+    rec_resp = await client.post('/api/attendance/recognize-image', data=rec_data, files=rec_files)
+    assert rec_resp.status_code == 200
+    rec_json = rec_resp.json()
+    assert rec_json['success'] is True
+    assert rec_json['faces_detected'] >= 1
+    assert 'results' in rec_json
+    assert 'annotated_image_url' in rec_json
+
+    # 7b. Test duplicate photo recognition
+    rec_files_dup = {'image': ('capture.jpg', sample_bytes, 'image/jpeg')}
+    rec_dup_resp = await client.post('/api/attendance/recognize-image', data=rec_data, files=rec_files_dup)
+    assert rec_dup_resp.status_code == 200
+    rec_dup_json = rec_dup_resp.json()
+    assert rec_dup_json['success'] is True
+    assert rec_dup_json['duplicates_skipped'] >= 1
 
     # Clean up
     sess_obj = await test_db_session.get(AttendanceSession, sess.id)

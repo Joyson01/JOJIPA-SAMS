@@ -1,3 +1,4 @@
+from typing import Optional
 import cv2
 import numpy as np
 from ai_engine.base import BoundingBox, QualityMetrics
@@ -19,6 +20,26 @@ class FaceQualityAnalyzer:
         self.min_brightness = min_brightness
         self.max_brightness = max_brightness
         self.min_contrast = min_contrast
+
+    def set_thresholds(
+        self,
+        min_face_size: Optional[int] = None,
+        min_sharpness: Optional[float] = None,
+        min_brightness: Optional[float] = None,
+        max_brightness: Optional[float] = None,
+        min_contrast: Optional[float] = None,
+    ) -> None:
+        """Dynamically update quality evaluation thresholds."""
+        if min_face_size is not None:
+            self.min_face_size = min_face_size
+        if min_sharpness is not None:
+            self.min_sharpness = min_sharpness
+        if min_brightness is not None:
+            self.min_brightness = min_brightness
+        if max_brightness is not None:
+            self.max_brightness = max_brightness
+        if min_contrast is not None:
+            self.min_contrast = min_contrast
 
     def analyze(self, image: np.ndarray, bbox: BoundingBox) -> QualityMetrics:
         """Computes quality metrics for the cropped face region."""

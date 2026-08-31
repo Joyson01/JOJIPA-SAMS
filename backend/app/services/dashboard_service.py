@@ -25,13 +25,29 @@ from backend.app.schemas.dashboard import (
 from backend.app.services.report_service import ReportService
 
 
-def format_time_ago(ts: Optional[datetime]) -> str:
+def normalize_dt(ts: Any) -> datetime:
+    if ts is None:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    if isinstance(ts, str):
+        try:
+            ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        except Exception:
+            return datetime.min.replace(tzinfo=timezone.utc)
+    if isinstance(ts, datetime):
+        if ts.tzinfo is None:
+            return ts.replace(tzinfo=timezone.utc)
+        return ts.astimezone(timezone.utc)
+    return datetime.min.replace(tzinfo=timezone.utc)
+
+
+def format_time_ago(ts: Any) -> str:
     if not ts:
         return "Unknown"
+    norm = normalize_dt(ts)
+    if norm == datetime.min.replace(tzinfo=timezone.utc):
+        return "Unknown"
     now = datetime.now(timezone.utc)
-    if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=timezone.utc)
-    delta = max(0, int((now - ts).total_seconds()))
+    delta = max(0, int((now - norm).total_seconds()))
     if delta < 60:
         return "Just now"
     if delta < 3600:
@@ -414,7 +430,7 @@ class DashboardService:
             )
 
         # Sort activities by timestamp descending and take top 8
-        recent_activities.sort(key=lambda x: x.timestamp, reverse=True)
+        recent_activities.sort(key=lambda x: normalize_dt(x.timestamp), reverse=True)
         recent_activities = recent_activities[:8]
 
         # ==========================================

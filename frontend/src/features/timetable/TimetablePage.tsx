@@ -24,6 +24,7 @@ import { fetchCameras } from '../../services/cameraApi';
 import { ClassSection, Subject, TimetableEntry } from '../../types/subject';
 import { CameraDevice } from '../../types/camera';
 import { SessionCreatePayload } from '../../types/attendance';
+import { formatApiErrorMessage } from '../../utils/apiError';
 
 interface TimetablePageProps {
   onNavigate?: (tab: string, extra?: any) => void;
@@ -245,10 +246,10 @@ export const TimetablePage: React.FC<TimetablePageProps> = ({ onNavigate }) => {
         alert('Attendance session created successfully!');
       }
     } catch (err: any) {
-      const detail = err.response?.data?.detail;
-      const msg = detail?.message || detail || 'Failed to create session.';
+      const msg = formatApiErrorMessage(err, 'Failed to create session.');
       setSessionError(msg);
-      if (detail?.details?.existing_session_id) {
+      const detail = err.response?.data?.detail;
+      if (detail && typeof detail === 'object' && detail.details?.existing_session_id) {
         setConflictSessionId(detail.details.existing_session_id);
       }
     } finally {

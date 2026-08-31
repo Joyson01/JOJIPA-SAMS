@@ -153,17 +153,31 @@ async def websocket_live_stream(
                     else:
                         is_marked = True
 
+                # Determine explicit visual status
+                if r.quality and not r.quality.is_valid:
+                    status_str = "QUALITY_REJECTED"
+                elif r.is_confirmed and r.decision == DecisionState.KNOWN and r.confirmed_name:
+                    status_str = "VERIFIED"
+                elif r.provisional_name:
+                    status_str = "VERIFYING"
+                else:
+                    status_str = "UNKNOWN"
+
                 face_telemetry.append(
                     {
                         "track_id": r.track_id,
                         "bbox": r.bbox.to_list(),
                         "state": r.state,
+                        "status": status_str,
                         "decision": r.decision.value,
                         "is_confirmed": r.is_confirmed,
-                        "student_id": r.confirmed_student_id,
-                        "student_name": r.confirmed_name,
-                        "student_code": r.confirmed_code,
-                        "roll_number": r.confirmed_roll,
+                        "student_id": r.confirmed_student_id or r.provisional_student_id,
+                        "student_name": r.confirmed_name or r.provisional_name,
+                        "student_code": r.confirmed_code or r.provisional_code,
+                        "roll_number": r.confirmed_roll or r.provisional_roll,
+                        "provisional_name": r.provisional_name,
+                        "frames_needed": r.frames_needed,
+                        "confidence_history": r.confidence_history,
                         "similarity": round(r.average_similarity if r.is_confirmed else r.current_similarity, 3),
                         "is_live": r.is_live,
                         "liveness_score": round(r.liveness_score, 2),
@@ -181,6 +195,9 @@ async def websocket_live_stream(
                 "fps": current_fps,
                 "latencies_ms": latencies,
                 "faces_count": len(results),
+                "faces_verified": sum(1 for r in results if r.is_confirmed and r.decision == DecisionState.KNOWN),
+                "faces_verifying": sum(1 for r in results if not r.is_confirmed and r.provisional_name),
+                "faces_unknown": sum(1 for r in results if r.decision == DecisionState.UNKNOWN),
                 "faces": face_telemetry,
                 "newly_marked": newly_marked_events,
             }

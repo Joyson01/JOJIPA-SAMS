@@ -33,6 +33,7 @@ import {
 } from '../../services/attendanceApi';
 import { fetchSubjects, fetchClasses, fetchClassTimetable } from '../../services/subjectApi';
 import { fetchCameras } from '../../services/cameraApi';
+import { formatApiErrorMessage } from '../../utils/apiError';
 import {
   AttendanceRecord,
   AttendanceSession,
@@ -355,10 +356,10 @@ export const AttendancePage: React.FC<AttendancePageProps> = ({ onNavigate }) =>
       await loadSessions();
       setSelectedSessionId(created.id);
     } catch (err: any) {
-      const detail = err.response?.data?.detail;
-      const msg = detail?.message || detail || 'Failed to schedule session.';
+      const msg = formatApiErrorMessage(err, 'Failed to schedule session.');
       setErrorMessage(msg);
-      if (detail?.details?.existing_session_id) {
+      const detail = err.response?.data?.detail;
+      if (detail && typeof detail === 'object' && detail.details?.existing_session_id) {
         setConflictSessionId(detail.details.existing_session_id);
       }
     } finally {
@@ -383,7 +384,7 @@ export const AttendancePage: React.FC<AttendancePageProps> = ({ onNavigate }) =>
       }
       loadSessions();
     } catch (err: any) {
-      alert(err.response?.data?.detail?.message || 'Failed to update attendance record.');
+      alert(formatApiErrorMessage(err, 'Failed to update attendance record.'));
     } finally {
       setOverrideSubmitting(false);
     }

@@ -53,6 +53,13 @@ export const discoverONVIFCameras = async (timeoutSec = 1.5): Promise<any> => {
   return response.data;
 };
 
+export const captureCameraFrame = async (
+  cameraId: string
+): Promise<{ success: boolean; camera_id: string; camera_name: string; frame_url: string; width: number; height: number; timestamp: string }> => {
+  const response = await apiClient.post(`/cameras/${cameraId}/capture`);
+  return response.data;
+};
+
 export const revokeMobilePairing = async (cameraId: string): Promise<void> => {
   await apiClient.post(`/cameras/${cameraId}/revoke-pairing`);
 };

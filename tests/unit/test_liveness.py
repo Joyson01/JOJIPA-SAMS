@@ -18,11 +18,11 @@ def liveness_detector():
 
 
 def test_genuine_face_passes_liveness(liveness_detector):
-    pankaj_path = WORKSPACE_ROOT / "tests" / "fixtures" / "pankaj.jpg"
-    if not pankaj_path.exists():
+    sample_path = WORKSPACE_ROOT / "tests" / "fixtures" / "sample_student.jpg"
+    if not sample_path.exists():
         pytest.skip("Dataset image not found")
 
-    img = cv2.imread(str(pankaj_path))
+    img = cv2.imread(str(sample_path))
     h, w = img.shape[:2]
     bbox = BoundingBox(int(w * 0.2), int(h * 0.2), int(w * 0.8), int(h * 0.8), 0.98)
 

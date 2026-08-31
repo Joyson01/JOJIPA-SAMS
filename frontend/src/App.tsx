@@ -17,18 +17,32 @@ import { CameraTestPage } from './features/camera-test/CameraTestPage';
 import { fetchHealthStatus } from './services/api';
 import { ServiceHealthResponse } from './types';
 
+import { ErrorBoundary } from './components/common/ErrorBoundary';
+
 export const App: React.FC = () => {
   const pathname = window.location.pathname;
 
   // Standalone Mobile & Diagnostic Routes
   if (pathname.startsWith('/mobile-camera')) {
-    return <MobileCameraPage />;
+    return (
+      <ErrorBoundary fallbackTitle="Mobile Camera Stream Error">
+        <MobileCameraPage />
+      </ErrorBoundary>
+    );
   }
   if (pathname.startsWith('/mobile-enrollment')) {
-    return <MobileEnrollmentPage />;
+    return (
+      <ErrorBoundary fallbackTitle="Mobile Face Enrollment Error">
+        <MobileEnrollmentPage />
+      </ErrorBoundary>
+    );
   }
   if (pathname.startsWith('/camera-test')) {
-    return <CameraTestPage />;
+    return (
+      <ErrorBoundary fallbackTitle="Camera Diagnostic Error">
+        <CameraTestPage />
+      </ErrorBoundary>
+    );
   }
 
   const [activeTab, setActiveTab] = useState<string>('dashboard');
@@ -65,31 +79,35 @@ export const App: React.FC = () => {
   };
 
   return (
-    <DashboardLayout
-      healthData={healthData}
-      healthStatus={healthStatus}
-      onRefreshHealth={loadHealth}
-      isRefreshing={isRefreshing}
-      activeTab={activeTab}
-      setActiveTab={setActiveTab}
-    >
-      {activeTab === 'dashboard' && <DashboardOverview onNavigate={handleNavigate} />}
-      {activeTab === 'students' && <StudentListPage onNavigate={handleNavigate} />}
-      {activeTab === 'subjects' && <SubjectManagementPage onNavigate={handleNavigate} />}
-      {activeTab === 'timetable' && <TimetablePage onNavigate={handleNavigate} />}
-      {activeTab === 'enrollment' && (
-        <FaceEnrollmentPage
-          initialStudentId={enrollingStudentId}
-          onNavigate={handleNavigate}
-        />
-      )}
-      {activeTab === 'live' && <LiveDashboardPage onNavigate={handleNavigate} />}
-      {activeTab === 'media' && <MediaAttendancePage onNavigate={handleNavigate} />}
-      {activeTab === 'attendance' && <AttendancePage />}
-      {activeTab === 'cameras' && <CameraManagementPage />}
-      {activeTab === 'reports' && <ReportsPage />}
-      {activeTab === 'settings' && <SettingsPage />}
-    </DashboardLayout>
+    <ErrorBoundary fallbackTitle="Application Error" fallbackMessage="An error occurred in the workspace layout.">
+      <DashboardLayout
+        healthData={healthData}
+        healthStatus={healthStatus}
+        onRefreshHealth={loadHealth}
+        isRefreshing={isRefreshing}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+      >
+        <ErrorBoundary key={activeTab} fallbackTitle={`Error in ${activeTab.toUpperCase()}`}>
+          {activeTab === 'dashboard' && <DashboardOverview onNavigate={handleNavigate} />}
+          {activeTab === 'students' && <StudentListPage onNavigate={handleNavigate} />}
+          {activeTab === 'subjects' && <SubjectManagementPage onNavigate={handleNavigate} />}
+          {activeTab === 'timetable' && <TimetablePage onNavigate={handleNavigate} />}
+          {activeTab === 'enrollment' && (
+            <FaceEnrollmentPage
+              initialStudentId={enrollingStudentId}
+              onNavigate={handleNavigate}
+            />
+          )}
+          {activeTab === 'live' && <LiveDashboardPage onNavigate={handleNavigate} />}
+          {activeTab === 'media' && <MediaAttendancePage onNavigate={handleNavigate} />}
+          {activeTab === 'attendance' && <AttendancePage />}
+          {activeTab === 'cameras' && <CameraManagementPage />}
+          {activeTab === 'reports' && <ReportsPage />}
+          {activeTab === 'settings' && <SettingsPage />}
+        </ErrorBoundary>
+      </DashboardLayout>
+    </ErrorBoundary>
   );
 };
 

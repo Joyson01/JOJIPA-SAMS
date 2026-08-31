@@ -1,154 +1,294 @@
-# JOJIPA-SAMS
-## Smart Attendance Management System
+# Smart Attendance Management System (SAMS)
 
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]()
-[![Tests](https://img.shields.io/badge/tests-100%20passed-success)]()
-[![Backend](https://img.shields.io/badge/FastAPI-0.115+-blue)]()
-[![Frontend](https://img.shields.io/badge/React-18.3+-61dafb)]()
-[![AI Engine](https://img.shields.io/badge/InsightFace-ArcFace-orange)]()
+SAMS is an AI-powered attendance management platform that uses computer vision and facial recognition to automatically identify students and record attendance from live cameras, uploaded images, and recorded classroom videos.
 
 ---
 
-## 1. Overview
+## Key Features
 
-**JOJIPA-SAMS** is an automated, AI-powered Face Attendance Management System engineered for colleges and university classrooms. It replaces manual roll calls and sign-in sheets with continuous multi-face recognition, 3-level duplicate protection, temporal track verification, automated absentee reconciliation, and seamless academic timetable synchronization.
-
----
-
-## 2. Key Features
-
-- **Multi-Source Camera Ingestion:**
-  - **Hardware Webcams:** Native USB and laptop webcams.
-  - **Mobile Camera Stations:** Zero-friction QR code pairing allowing any smartphone to stream live video to the laptop over secure WebSockets.
-  - **CCTV / RTSP IP Feeds:** Direct integration with network surveillance cameras with non-blocking stream workers.
-  - **Media Attendance:** Batch processing of high-resolution classroom photos (Image Attendance) and recorded lecture videos (Video Attendance).
-- **Official Weekly Timetable Grid:**
-  - Real 8-period $\times$ 5-day collegiate schedule for Department of Computer Engineering (Class `TE-B`, Effective From: `15/06/2026`).
-  - Concurrent multi-batch rendering (`B1` and `B2`) within the same grid cell with one-click session creation.
-- **Robust AI Recognition Pipeline:**
-  - **SCRFD-10G:** High-precision multi-face detection with 5-point landmark localization.
-  - **Umeyama Affine Alignment:** 5-point facial normalization to canonical $112 \times 112$ crops.
-  - **ArcFace ResNet-50:** 512-dimensional $L_2$-normalized biometric feature embeddings.
-  - **ByteTrack Multi-Target Tracking:** Kalman filter bounding box state tracking with occlusion resilience.
-  - **Sliding-Window Temporal Verification:** Multi-frame consensus voting (4/7 frames) to eliminate false detections.
-- **Strict 3-Level Duplicate Protection:**
-  - Enforces `UNIQUE(session_id, student_id)`. Continuous sightings update presence telemetry without duplicate database records.
-- **Presence State Machine:**
-  - Real-time tracking of `VISIBLE`, `TEMPORARILY_NOT_VISIBLE`, `RETURNED`, and `LEFT` states.
-- **Academic Hierarchy & Defaulters Analytics:**
-  - Accredited courses (`24CSPC501C`, `24CSPC502C`, `24MDM501XC`, `24OE501XC`, `24VSE501C`), classes, batch assignments, attendance thresholds ($75\%$), and RFC-4180 CSV export.
+- **Face Detection**: Single-shot multi-face detection and 5-point facial landmark localization powered by SCRFD (`buffalo_l`).
+- **Face Recognition**: Deep 512-dimensional facial embedding extraction using ArcFace (ResNet-50).
+- **Student Enrollment**: Web-based facial sample capture and automatic embedding vector generation.
+- **Facial Embedding Generation**: Normalized feature vectors stored locally with fast matrix dot-product cosine matching.
+- **Live Webcam Attendance**: Real-time browser-based video stream processing for instant classroom check-ins.
+- **Mobile & IP Camera Integration**: Connect external mobile phone cameras and IP streams over local HTTP/MJPEG endpoints.
+- **RTSP / CCTV Support**: Ingest continuous video feeds from institutional CCTV infrastructure via RTSP URLs.
+- **Image-Based Attendance**: Upload high-resolution group photographs with automatic multi-face bounding-box annotations and batch attendance marking.
+- **Video-Based Attendance**: Upload recorded lecture videos with configurable frame sampling, temporal consensus voting, and timestamped attendance summaries.
+- **Face Tracking**: Persistent multi-face tracking across video frames using ByteTrack and Kalman filtering.
+- **Duplicate Attendance Prevention**: Multi-layer safeguards (in-frame deduplication, presence state checks, and database-level unique constraints) prevent double-marking within the same session.
+- **Attendance Session Management**: Create, schedule, activate, pause, and complete attendance sessions mapped to courses and classrooms.
+- **Timetable Integration**: Weekly schedule grid with color-coded subject blocks and lab batch allocations.
+- **Reports & Attendance History**: View attendance percentages, individual student presence histories, and export CSV reports.
+- **Administrative Dashboard**: Real-time overview of active sessions, student statistics, system health, and AI engine status.
 
 ---
 
-## 3. Technology Stack
+## System Architecture
 
-- **Frontend:** React 18.3.1, TypeScript 5.6.3, Vite 5.4.8, Tailwind CSS 3.4.13, Lucide React, Axios, QRCode
-- **Backend:** FastAPI 0.115+, Python 3.10+, Uvicorn, SQLAlchemy 2.0 (AsyncIO), Pydantic v2, PyJWT, Bcrypt
-- **Computer Vision & AI:** InsightFace 0.7.3 (`buffalo_l`), SCRFD-10G, ArcFace (ResNet-50), ONNX Runtime 1.18+, OpenCV 4.10+, NumPy, SciPy
-- **Databases:** SQLite 3 (Async via `aiosqlite`) for local development; PostgreSQL 16+ for enterprise production
-- **Testing:** Pytest 8.2+, Pytest-AsyncIO (100 automated tests passing)
+```mermaid
+flowchart LR
+    A[Camera / Image / Video] --> B[Face Detection - SCRFD]
+    B --> C[Face Alignment - 112x112]
+    C --> D[Face Recognition - ArcFace]
+    D --> E[(Student Embedding Database)]
+    D --> F[Attendance Decision Engine]
+    F --> G[(Attendance Database)]
+    G --> H[Dashboard & Reports]
+```
+
+For detailed architectural specifications, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 
-## 4. Quick Start (One-Click Launch)
+## Technology Stack
 
-### Step 1: Clone Repository and Install Dependencies
+### Frontend
+- **Framework**: React 18
+- **Language**: TypeScript 5.6
+- **Build Tool**: Vite 5.4
+- **Styling**: Tailwind CSS 3.4
+- **Icons & UI**: Lucide React
+- **HTTP Client**: Axios
+
+### Backend
+- **Framework**: FastAPI (ASGI)
+- **Language**: Python 3.10+
+- **Server**: Uvicorn
+- **ORM / Database Access**: SQLAlchemy 2.0 (Async Engine)
+- **Data Validation**: Pydantic V2
+- **Authentication**: PyJWT & Bcrypt
+
+### AI / Computer Vision
+- **Face Analysis**: InsightFace (`buffalo_l` model pack)
+- **Inference Runtime**: ONNX Runtime
+- **Image Processing**: OpenCV 4.10 (`opencv-python`)
+- **Numerical Computation**: NumPy & SciPy
+
+### Database
+- **Development (Default)**: SQLite via `aiosqlite` (zero-configuration local file)
+- **Production**: PostgreSQL with `asyncpg`
+
+---
+
+## AI Recognition Pipeline
+
+```text
+Camera / Image / Video
+          ↓
+    Face Detection (SCRFD 10G)
+          ↓
+    Face Alignment (2D Affine Transform to 112x112)
+          ↓
+  Embedding Extraction (ArcFace ResNet-50)
+          ↓
+  Embedding Normalization (L2 Unit Vector)
+          ↓
+  Cosine Similarity Matching (Dot Product vs Gallery)
+          ↓
+    Confidence Threshold (Known >= 0.65, Candidate 0.40 - 0.64)
+          ↓
+  Student Identification
+          ↓
+   Duplicate Check (In-Frame & Session Constraint)
+          ↓
+   Attendance Marked (Committed to Database)
+```
+
+For the complete mathematical formulation and anti-spoofing details, see [docs/FACE_RECOGNITION.md](docs/FACE_RECOGNITION.md).
+
+---
+
+## Installation & Setup
+
+### Prerequisites
+- Python 3.10, 3.11, 3.12, or 3.14
+- Node.js 18+ and npm
+- Git
+
+### 1. Clone the Repository
 ```bash
-git clone https://github.com/Joyson01/SAMS.git
-cd "SAMS Mark-2"
+git clone https://github.com/YOUR_USERNAME/sams.git
+cd sams
+```
 
-# 1. Setup Python virtual environment
+### 2. Configure Environment Variables
+```bash
+cp .env.example .env
+```
+
+### 3. Backend Setup
+```bash
+# Create and activate Python virtual environment
 python3 -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate   # On Windows: .venv\Scripts\activate
+
+# Install Python dependencies
 pip install --upgrade pip
 pip install -r requirements.txt
 
-# 2. Setup Frontend dependencies
+# Seed clean demo dataset (fictional students, subjects, classes, and timetable)
+python -m scripts.seed_demo_data
+
+# Start the FastAPI server
+uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Backend endpoints:
+- **Swagger Documentation**: [http://localhost:8000/api/v1/docs](http://localhost:8000/api/v1/docs)
+- **Health Check**: [http://localhost:8000/health](http://localhost:8000/health)
+
+### 4. Frontend Setup
+```bash
+# In a new terminal window:
 cd frontend
-pnpm install
-cd ..
-
-# 3. Import Official TE-B Academic Timetable
-python3 scripts/import_teb_timetable.py
+npm install
+npm run dev
 ```
 
-### Step 2: Start All Services
+Open your browser at **[http://localhost:5173](http://localhost:5173)**.
+
+For complete Docker instructions and GPU configuration, see [docs/INSTALLATION.md](docs/INSTALLATION.md).
+
+---
+
+## Camera Setup
+
+SAMS supports five visual input sources:
+
+1. **Laptop / USB Webcam**:
+   - Navigate to **Live Attendance** in the frontend dashboard.
+   - Grant browser camera permissions when prompted.
+2. **Mobile IP Camera**:
+   - Install a standard IP camera app on your smartphone (e.g. IP Webcam).
+   - In **Camera Management**, add a camera with source `IP_CAMERA` and URL:
+     ```text
+     http://YOUR_MOBILE_IP:PORT/video
+     ```
+3. **RTSP CCTV Camera**:
+   - In **Camera Management**, register an RTSP stream URL:
+     ```text
+     rtsp://YOUR_CAMERA_IP:554/stream
+     ```
+   - SAMS connects via background threaded workers and reconnects automatically if the stream drops.
+4. **Uploaded Image**:
+   - Navigate to **Media Attendance**, select **Image Attendance**, choose an attendance session, and upload a JPEG/PNG photo.
+5. **Uploaded Video**:
+   - In **Media Attendance**, select **Video Attendance**, upload a video file (MP4/AVI/MKV), and process it with multi-frame temporal voting.
+
+---
+
+## Project Structure
+
+```text
+SAMS/
+├── ai_engine/               # Computer vision & recognition engine
+│   ├── alignment/           # 2D similarity transform & landmark alignment
+│   ├── detection/           # SCRFD face detector
+│   ├── liveness/            # Texture & anti-spoofing checker
+│   ├── pipeline/            # Face & video processing pipelines
+│   ├── quality/             # Pose estimation & blur analysis
+│   ├── recognition/         # ArcFace feature extractor & vector matcher
+│   ├── streaming/           # Thread-safe RTSP capture worker
+│   ├── tracking/            # ByteTrack & Kalman Filter tracker
+│   └── verification/        # Temporal sliding-window verifier
+│
+├── backend/                 # FastAPI backend application
+│   ├── alembic/             # Database migration scripts
+│   ├── app/
+│   │   ├── api/v1/          # REST API endpoints & routers
+│   │   ├── core/            # App configuration, security & logging
+│   │   ├── database/        # Async sessionmaker & SQLite adapter
+│   │   ├── models/          # SQLAlchemy 2.0 ORM models
+│   │   ├── schemas/         # Pydantic validation schemas
+│   │   ├── services/        # Business logic & face recognition service
+│   │   └── main.py          # FastAPI application entry point
+│   └── main.py              # Root backend entry point
+│
+├── frontend/                # React 18 + Vite + TypeScript frontend
+│   ├── src/
+│   │   ├── components/      # Reusable UI components & ErrorBoundary
+│   │   ├── features/        # Feature pages (Attendance, Live, Media, etc.)
+│   │   ├── layouts/         # Dashboard layout & sidebar navigation
+│   │   ├── services/        # API client modules
+│   │   ├── types/           # TypeScript interfaces
+│   │   └── App.tsx          # Main application component & routes
+│   ├── package.json         # Frontend dependencies & scripts
+│   └── vite.config.ts       # Vite bundler configuration
+│
+├── docs/                    # Technical documentation
+│   ├── API.md               # REST & WebSocket API specification
+│   ├── ARCHITECTURE.md      # Detailed system architecture
+│   ├── DEMO_GUIDE.md        # Presentation & demonstration script
+│   ├── FACE_RECOGNITION.md  # AI pipeline mathematical reference
+│   └── INSTALLATION.md      # Installation & deployment guide
+│
+├── sample-data/             # Sample dataset guidelines
+├── scripts/                 # Database seeders & lifecycle scripts
+├── tests/                   # Automated test suite (102 tests)
+├── .env.example             # Environment configuration template
+├── .gitignore               # Build, database, and biometric ignore rules
+├── docker-compose.yml       # Docker container orchestration
+├── LICENSE                  # MIT License
+├── package.json             # Root metadata & scripts
+└── requirements.txt         # Python package dependencies
+```
+
+---
+
+## Usage Workflow
+
+1. **Add Students**: Go to **Students** and create student profiles with department, class, and roll number.
+2. **Enroll Facial Images**: Open **Face Enrollment**, select a student, capture 3–5 face samples across angles, and complete enrollment.
+3. **Generate Embeddings**: Face embeddings are extracted and normalized automatically during enrollment.
+4. **Create Academic Sessions**: In **Attendance**, select a subject and class section, and open a session.
+5. **Connect Camera**: In **Camera Management**, verify webcam, mobile IP camera, or RTSP feed connectivity.
+6. **Start Live Attendance**: Open **Live Attendance** to recognize students in real-time from the video feed.
+7. **Media Attendance**: Upload classroom photographs or lecture videos in **Media Attendance** for automated batch recognition.
+8. **Review Attendance**: Check live attendance counts, marked timestamps, and detection confidence scores.
+9. **Generate Reports**: In **Reports**, review attendance metrics and export CSV summaries.
+
+---
+
+## Accuracy and Recognition Factors
+
+Facial recognition accuracy in real-world deployments depends on environmental and operational factors:
+- **Lighting Conditions**: Even, diffused lighting produces optimal results; strong backlighting or deep shadows can reduce detection confidence.
+- **Face Angle & Pose**: SCRFD and ArcFace operate effectively on yaw and pitch angles up to ±35°; extreme profile views require repositioning.
+- **Occlusion**: Partial occlusions (masks, hands, glasses) are handled via multi-frame temporal voting, which waits for clear frames before confirming identity.
+- **Image Resolution**: Faces must have a minimum bounding-box dimension of 60×60 pixels for reliable embedding extraction.
+- **Enrollment Quality**: Enrolling 3–5 clean, well-lit samples per student significantly improves matching reliability.
+- **Configurable Thresholds**: The similarity threshold (default: 0.65) can be adjusted in **Settings** to balance true positives and false acceptance rates.
+
+---
+
+## Privacy and Security
+
+- **Local Mathematical Embeddings**: SAMS converts facial images into dense 512-dimensional numerical vectors. Real raw photographs are not exposed publicly.
+- **No Biometric Data in Version Control**: Facial embedding files (`.npy`, `.onnx`) and database files (`*.db`) are strictly excluded from Git tracking via `.gitignore`.
+- **Institutional Compliance**: Facial biometric systems should be operated in compliance with applicable data protection regulations (such as GDPR, FERPA, or local data privacy laws) and with informed student consent.
+
+---
+
+## Testing
+
+Run the full automated test suite (102 tests):
 ```bash
-# Starts FastAPI Backend (Port 8000) and React HTTPS Frontend (Port 5173)
-./start.sh
-```
-
-### Step 3: Stop Services
-```bash
-./scripts/stop.sh
+pytest
 ```
 
 ---
 
-## 5. Application Access Points
+## Documentation
 
-- **Administrative Web App:** `https://localhost:5173`
-- **Mobile Camera Capture Station:** `https://<YOUR_LOCAL_IP>:5173/mobile-camera`
-- **FastAPI Documentation (Swagger UI):** `http://localhost:8000/docs`
-- **System Health Probe:** `http://localhost:8000/health`
-
----
-
-## 6. Camera & Mobile Setup Guide
-
-### 6.1 Hardware / Laptop Webcam
-1. Navigate to **Cameras** and click **Add Camera** $\to$ **Hardware Webcam**.
-2. Select the webcam in **Live Attendance** to begin scanning.
-
-### 6.2 Mobile Phone Camera (Phone as Camera Station)
-1. Ensure laptop and smartphone are connected to the **same Wi-Fi network**.
-2. On laptop, open **Cameras** $\to$ click **Add Camera** $\to$ **Mobile Phone**.
-3. Click **Generate QR Code**.
-4. Scan the QR code with your phone camera to open `https://<LOCAL_IP>:5173/mobile-camera`.
-5. On the phone browser, accept the camera permission prompt and tap **Start Camera**.
-6. On laptop, select the mobile camera in **Live Attendance** to view the live phone stream.
-
-### 6.3 CCTV / RTSP IP Stream
-1. In **Cameras**, click **Add Camera** $\to$ **CCTV / RTSP**.
-2. Provide stream URL (e.g. `rtsp://admin:password@192.168.1.50:554/h264`).
-3. SAMS spawns a non-blocking background worker to ingest and decode the stream.
-
-### 6.4 Media Attendance (Image & Video)
-1. In the sidebar, select **Media Attendance**.
-2. Choose **Image Attendance** (upload group classroom photos) or **Video Attendance** (upload pre-recorded lecture MP4/AVI files).
-3. Select the target attendance session and click **Analyze**. Attendance records are automatically linked with source tags (`MEDIA_IMAGE` or `MEDIA_VIDEO`).
+- [System Architecture](docs/ARCHITECTURE.md)
+- [Installation Guide](docs/INSTALLATION.md)
+- [REST & WebSocket API Reference](docs/API.md)
+- [Face Recognition Pipeline](docs/FACE_RECOGNITION.md)
+- [Showcase Demonstration Script](docs/DEMO_GUIDE.md)
 
 ---
 
-## 7. Automated Testing & Verification
+## License
 
-Run the comprehensive automated test suite (100 tests):
-
-```bash
-# Run full Pytest suite
-./.venv/bin/pytest
-
-# Build frontend to verify TypeScript compilation
-pnpm --prefix frontend build
-```
-
----
-
-## 8. Real-World Limitations
-
-- **Passive Liveness on Static Photos:** Single still photos cannot establish continuous dynamic liveness.
-- **Extreme Pose Angles:** Head rotations $> 55^\circ$ Yaw or $> 45^\circ$ Pitch lack sufficient bilateral landmark visibility and are filtered by the quality analyzer.
-- **Low Illumination:** Ambient brightness $< 40.0$ intensity triggers quality rejections.
-- **Wi-Fi Bandwidth:** Mobile phone streaming requires adequate local wireless bandwidth for stable video frame transmission.
-
----
-
-## 9. Technical Project Report
-
-For deep architectural documentation, mathematical algorithm breakdowns, ER diagrams, and API tables, refer to [`PROJECT_REPORT.md`](file:///home/joyson/Documents/SAMS%20Mark-2/PROJECT_REPORT.md).
-
----
-
-## 10. License
-
-Academic & Educational Use. Developed for JOJIPA-SAMS — Smart Attendance Management System.
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.

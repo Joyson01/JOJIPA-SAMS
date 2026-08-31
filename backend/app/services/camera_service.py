@@ -232,78 +232,109 @@ class CameraService:
         connection -> stream -> frame decoding -> resolution -> FPS -> face detector verification -> latency."""
         start_time = time.perf_counter()
         source = stream_url or device_id or "0"
+        from ai_engine.streaming.rtsp_worker import get_candidate_stream_urls, is_network_endpoint_reachable
 
-        try:
-            url: int | str = int(source) if str(source).isdigit() else str(source)
-            cap = cv2.VideoCapture(url)
-            if not cap.isOpened():
-                latency_ms = round((time.perf_counter() - start_time) * 1000, 1)
-                return CameraTestResult(
-                    success=False,
-                    status="CAMERA ERROR",
-                    message=f"Could not connect to camera source '{source}'. Verify device ID or RTSP URL.",
-                    connection=False,
-                    stream=False,
-                    frames=False,
-                    detector=False,
-                    latency_ms=latency_ms,
-                )
+        candidates = get_candidate_stream_urls(str(source))
+        last_err = None
 
-            ret, frame = cap.read()
-            measured_fps = cap.get(cv2.CAP_PROP_FPS) or 15.0
-            cap.release()
+        for cand in candidates:
+            try:
+                # Fast TCP probe to avoid long blocking if network IP is unreachable
+                if not is_network_endpoint_reachable(cand, timeout_sec=0.8):
+                    continue
 
-            latency_ms = round((time.perf_counter() - start_time) * 1000, 1)
-            if ret and frame is not None and frame.size > 0:
-                h, w = frame.shape[:2]
-                res_str = f"{w}x{h}"
+                url: int | str = int(cand) if str(cand).isdigit() else str(cand)
+                cap = cv2.VideoCapture(url)
+                if not cap.isOpened():
+                    cap.release()
+                    continue
 
-                # Test face detector pipeline verification
-                detector_ok = True
+                ret, frame = cap.read()
+                measured_fps = cap.get(cv2.CAP_PROP_FPS) or 15.0
+                cap.release()
+
+                if ret and frame is not None and frame.size > 0:
+                    latency_ms = round((time.perf_counter() - start_time) * 1000, 1)
+                    h, w = frame.shape[:2]
+                    res_str = f"{w}x{h}"
+
+                    # Test face detector verification
+                    detector_ok = True
+                    try:
+                        from backend.app.services.face_recognition_service import get_face_app
+                        app = get_face_app()
+                        app.get(frame)
+                    except Exception as det_exc:
+                        logger.warning(f"Detector diagnostic notice: {det_exc}")
+                        detector_ok = False
+
+                    return CameraTestResult(
+                        success=True,
+                        status="CAMERA READY",
+                        message=f"Camera healthy ({cand}): receiving {res_str} video stream at {measured_fps:.0f} FPS",
+                        connection=True,
+                        stream=True,
+                        frames=True,
+                        detector=detector_ok,
+                        resolution=res_str,
+                        fps=round(float(measured_fps), 1),
+                        latency_ms=latency_ms,
+                    )
+            except Exception as e:
+                last_err = str(e)
+                continue
+
+        latency_ms = round((time.perf_counter() - start_time) * 1000, 1)
+        return CameraTestResult(
+            success=False,
+            status="CAMERA ERROR",
+            message=f"Could not connect to camera source '{source}'. Verify IP Camera app is running on mobile device or RTSP stream is accessible.",
+            connection=False,
+            stream=False,
+            frames=False,
+            detector=False,
+            latency_ms=latency_ms,
+        )
+
+    @classmethod
+    def capture_camera_frame(cls, camera_id: str, camera_obj: Optional[Camera] = None) -> Optional[np.ndarray]:
+        """Captures the freshest high-quality frame from active worker or directly from stream URL."""
+        worker = _active_camera_workers.get(camera_id)
+        if worker:
+            snap = worker.capture_snapshot()
+            if snap is not None:
+                return snap
+
+        frame = cls.get_cached_frame(camera_id)
+        if frame is not None:
+            return frame
+
+        if camera_obj and camera_obj.stream_url:
+            import urllib.request
+            from ai_engine.streaming.rtsp_worker import get_candidate_stream_urls, is_network_endpoint_reachable
+            for url in get_candidate_stream_urls(camera_obj.stream_url):
                 try:
-                    from backend.app.services.recognition_service import get_pipeline
-                    pipeline = get_pipeline()
-                    # Quick detection check
-                    pipeline.detector.detect_faces(frame)
-                except Exception as det_exc:
-                    logger.warning(f"Detector diagnostic notice: {det_exc}")
-                    detector_ok = False
-
-                return CameraTestResult(
-                    success=True,
-                    status="CAMERA READY",
-                    message=f"Camera healthy: receiving {res_str} video stream at {measured_fps:.0f} FPS",
-                    connection=True,
-                    stream=True,
-                    frames=True,
-                    detector=detector_ok,
-                    resolution=res_str,
-                    fps=round(float(measured_fps), 1),
-                    latency_ms=latency_ms,
-                )
-            else:
-                return CameraTestResult(
-                    success=False,
-                    status="CAMERA ERROR",
-                    message="Camera connected but returned an empty or invalid image buffer (NO_FRAME).",
-                    connection=True,
-                    stream=True,
-                    frames=False,
-                    detector=False,
-                    latency_ms=latency_ms,
-                )
-        except Exception as e:
-            latency_ms = round((time.perf_counter() - start_time) * 1000, 1)
-            return CameraTestResult(
-                success=False,
-                status="CAMERA ERROR",
-                message=f"Diagnostic handshake failed: {str(e)}",
-                connection=False,
-                stream=False,
-                frames=False,
-                detector=False,
-                latency_ms=latency_ms,
-            )
+                    if not is_network_endpoint_reachable(url, timeout_sec=0.8):
+                        continue
+                    if url.endswith(".jpg") or url.endswith(".jpeg"):
+                        req = urllib.request.Request(url, headers={"User-Agent": "JOJIPA-SAMS/1.0"})
+                        with urllib.request.urlopen(req, timeout=2.0) as resp:
+                            img_data = resp.read()
+                            arr = np.frombuffer(img_data, np.uint8)
+                            snap = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                            if snap is not None:
+                                return snap
+                    else:
+                        u = int(url) if str(url).isdigit() else str(url)
+                        cap = cv2.VideoCapture(u)
+                        if cap.isOpened():
+                            ret, f = cap.read()
+                            cap.release()
+                            if ret and f is not None:
+                                return f
+                except Exception:
+                    continue
+        return None
 
     @classmethod
     async def create_or_renew_mobile_pairing(

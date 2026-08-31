@@ -18,13 +18,13 @@ def face_pipeline():
 
 
 def test_real_pipeline_enroll_and_recognize(face_pipeline):
-    pankaj_test_path = WORKSPACE_ROOT / "tests" / "fixtures" / "pankaj.jpg"
+    sample_test_path = WORKSPACE_ROOT / "tests" / "fixtures" / "sample_student.jpg"
 
-    if not pankaj_test_path.exists():
+    if not sample_test_path.exists():
         pytest.skip("Dataset images not found on disk")
 
     # 1. Read enrollment image
-    img_p1 = cv2.imread(str(pankaj_test_path))
+    img_p1 = cv2.imread(str(sample_test_path))
 
     # 2. Process enrollment sample
     ok_p1, emb_p1, q_p1, pose_p1, _ = face_pipeline.process_enrollment_image(img_p1)
@@ -34,24 +34,23 @@ def test_real_pipeline_enroll_and_recognize(face_pipeline):
 
     # 3. Load Gallery with templates
     templates = [
-        EnrolledTemplate("p1", "s_pankaj", "STU-001", "CSE-01", "Pankaj", emb_p1, q_p1.sharpness, pose_p1.pose_type),
+        EnrolledTemplate("p1", "s_sample", "STU-001", "CSE-01", "Sample Student", emb_p1, q_p1.sharpness, pose_p1.pose_type),
     ]
     face_pipeline.load_gallery(templates)
 
-    # 4. Recognize Pankaj Test Image
-    img_test_pankaj = cv2.imread(str(pankaj_test_path))
-    results_pankaj, latencies_pankaj = face_pipeline.process_frame(img_test_pankaj)
+    # 4. Recognize Sample Test Image
+    img_test_sample = cv2.imread(str(sample_test_path))
+    results_sample, latencies_sample = face_pipeline.process_frame(img_test_sample)
 
-    assert len(results_pankaj) >= 1
-    best_face = results_pankaj[0]
+    assert len(results_sample) >= 1
+    best_face = results_sample[0]
     assert best_face.decision == DecisionState.KNOWN
     assert best_face.best_match is not None
-    assert best_face.best_match.name == "Pankaj"
+    assert best_face.best_match.name == "Sample Student"
     assert best_face.best_match.similarity >= 0.65
 
     # Check latency
-    assert latencies_pankaj["total_pipeline_ms"] > 0
-    print(f"\n[LATENCY BENCHMARK] Single face pipeline: {latencies_pankaj}")
+    assert latencies_sample["total_pipeline_ms"] > 0
 
 
 def test_multi_person_classroom_recognition(face_pipeline):

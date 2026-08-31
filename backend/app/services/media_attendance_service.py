@@ -2,40 +2,52 @@ import asyncio
 import logging
 import os
 import time
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Set
 
 import cv2
 import numpy as np
-from sqlalchemy import desc, select
+from sqlalchemy import desc, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from backend.app.core.config import settings
 from backend.app.models.entities import (
     AttendanceRecord,
     AttendanceSession,
     AuditLog,
+    FaceProfile,
     MediaProcessingJob,
     Student,
 )
 from backend.app.schemas.attendance import AttendanceMarkPayload
 from backend.app.schemas.media_attendance import (
+    DetectedMediaFaceItem,
     MediaAnalysisResponse,
     MediaAttendanceItem,
     MediaJobResponse,
+    SessionBiometricValidationResponse,
     UnresolvedFaceItem,
 )
 from backend.app.services.attendance_service import AttendanceService, SessionNotFoundError
-from backend.app.services.recognition_service import RecognitionService, get_pipeline
+from backend.app.services.face_recognition_service import (
+    face_recognition_service,
+    UNKNOWN_THRESHOLD,
+    HIGH_CONFIDENCE,
+)
+from backend.app.services.media_processing_service import media_processing_service
 
 logger = logging.getLogger('jojipa_sams.media_attendance')
 
-# Global map of active job cancellation events
 _active_cancellation_events: Dict[str, asyncio.Event] = {}
 
-UPLOAD_DIR = Path("data/uploads/media")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+UPLOAD_DIR = PROJECT_ROOT / "data" / "uploads" / "media"
+OUTPUTS_DIR = PROJECT_ROOT / "outputs"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
 
 MAX_IMAGE_SIZE_BYTES = 20 * 1024 * 1024   # 20 MB
 MAX_VIDEO_SIZE_BYTES = 500 * 1024 * 1024  # 500 MB
@@ -47,6 +59,54 @@ def _utc_now() -> datetime:
 
 class MediaAttendanceService:
     @classmethod
+    async def validate_session_biometrics(
+        cls,
+        db: AsyncSession,
+        session_id: str,
+    ) -> SessionBiometricValidationResponse:
+        """Validates that session exists and evaluates biometric enrollment readiness of students."""
+        session_res = await db.execute(
+            select(AttendanceSession).where(AttendanceSession.id == session_id)
+        )
+        session_obj = session_res.scalars().first()
+        if not session_obj:
+            raise SessionNotFoundError(f"Attendance session '{session_id}' not found.")
+
+        # Query all active students
+        st_res = await db.execute(
+            select(Student).where(Student.status == "ACTIVE")
+        )
+        all_students = st_res.scalars().all()
+        total_students = len(all_students)
+
+        # Query students with active face profiles
+        fp_res = await db.execute(
+            select(FaceProfile.student_id).distinct()
+        )
+        enrolled_student_ids = set(fp_res.scalars().all())
+        students_with_face_data = len(enrolled_student_ids)
+        students_missing_face_data = max(0, total_students - students_with_face_data)
+
+        can_process = students_with_face_data > 0
+        warning = None
+        if not can_process:
+            warning = "No enrolled student biometric data available. Please register student faces before processing attendance."
+        elif students_missing_face_data > 0:
+            warning = f"{students_missing_face_data} student(s) lack registered face profiles and cannot be recognized."
+
+        return SessionBiometricValidationResponse(
+            session_id=session_id,
+            subject=session_obj.subject,
+            class_name=session_obj.class_name,
+            status=session_obj.status,
+            total_enrolled_students=total_students,
+            students_with_face_data=students_with_face_data,
+            students_missing_face_data=students_missing_face_data,
+            can_process=can_process,
+            warning_message=warning,
+        )
+
+    @classmethod
     async def analyze_image(
         cls,
         db: AsyncSession,
@@ -54,8 +114,9 @@ class MediaAttendanceService:
         image_bytes: bytes,
         filename: str = "uploaded_image.jpg",
         created_by: Optional[str] = None,
+        threshold: float = UNKNOWN_THRESHOLD,
     ) -> MediaAnalysisResponse:
-        """Processes a single static image for classroom attendance using the common AI pipeline."""
+        """Processes static image for classroom attendance using InsightFace buffalo_l recognition engine."""
         t0 = time.perf_counter()
 
         # 1. Verify session exists
@@ -66,96 +127,15 @@ class MediaAttendanceService:
         if not session_obj:
             raise SessionNotFoundError(f"Attendance session '{session_id}' not found.")
 
-        # 2. Decode image
-        nparr = np.frombuffer(image_bytes, np.uint8)
-        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        if image is None:
-            raise ValueError("Could not decode image bytes. Unsupported or corrupted format.")
+        # 2. Run core media processing service
+        result_dict = media_processing_service.process_image_attendance(
+            image_input=image_bytes,
+            session_id=session_id,
+            filename=filename,
+            threshold=threshold,
+        )
 
-        h, w = image.shape[:2]
-        resolution_str = f"{w}x{h}"
-
-        # 3. Ensure gallery is synchronized
-        pipeline = get_pipeline()
-        if pipeline.matcher.total_templates == 0:
-            await RecognitionService.sync_gallery_from_db(db)
-
-        # 4. Run full recognition pipeline
-        results, face_boxes = pipeline.process_frame(image)
-
-        recognized_items: List[MediaAttendanceItem] = []
-        unresolved_items: List[UnresolvedFaceItem] = []
-        marked_student_ids: Set[str] = set()
-
-        # Fetch enrolled student details
-        student_lookup: Dict[str, Student] = {}
-        all_students_res = await db.execute(select(Student))
-        for st in all_students_res.scalars().all():
-            student_lookup[st.id] = st
-
-        for idx, r in enumerate(results):
-            face_box = face_boxes[idx].bbox.to_list()[:4] if idx < len(face_boxes) else []
-            quality_score = round(float(getattr(face_boxes[idx], 'det_score', 1.0)), 3) if idx < len(face_boxes) else 1.0
-
-            if r.decision.value == "KNOWN" and r.best_match:
-                st_id = r.best_match.student_id
-                st_ent = student_lookup.get(st_id)
-                st_name = st_ent.full_name if st_ent else r.best_match.name
-                st_code = st_ent.student_code if st_ent else ""
-                st_roll = st_ent.roll_number if st_ent else ""
-
-                # Mark attendance with MEDIA_IMAGE source
-                if st_id not in marked_student_ids:
-                    try:
-                        await AttendanceService.mark_attendance(
-                            db=db,
-                            session_id=session_id,
-                            payload=AttendanceMarkPayload(
-                                student_id=st_id,
-                                confidence=r.best_match.similarity,
-                                liveness_score=1.0,
-                                source="MEDIA_IMAGE",
-                                remarks=f"Media Image: {filename} ({r.best_match.confidence_pct:.1f}%)",
-                            ),
-                            allow_non_active=True,
-                        )
-                        marked_student_ids.add(st_id)
-                    except Exception as e:
-                        logger.warning(f"Attendance mark error for {st_name}: {e}")
-
-                recognized_items.append(
-                    MediaAttendanceItem(
-                        student_id=st_id,
-                        student_name=st_name,
-                        student_code=st_code,
-                        roll_number=st_roll,
-                        confidence=round(r.best_match.similarity, 4),
-                        confidence_pct=round(r.best_match.confidence_pct, 1),
-                        attendance_status="PRESENT",
-                        decision="KNOWN",
-                        first_seen="Image Capture",
-                        last_seen="Image Capture",
-                        observation_count=1,
-                        remarks=f"Confidence {r.best_match.confidence_pct:.1f}%",
-                    )
-                )
-            else:
-                # UNKNOWN or UNCERTAIN face -> DO NOT mark attendance
-                unresolved_items.append(
-                    UnresolvedFaceItem(
-                        face_id=f"face_{idx + 1}",
-                        decision=r.decision.value,
-                        confidence=round(r.best_match.similarity, 4) if r.best_match else 0.0,
-                        confidence_pct=round(r.best_match.confidence_pct, 1) if r.best_match else 0.0,
-                        bbox=face_box,
-                        quality_score=quality_score,
-                        rejection_reason=r.rejection_reason or ("Unrecognized student" if r.decision.value == "UNKNOWN" else "Ambiguous similarity"),
-                    )
-                )
-
-        elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 2)
-
-        # Save media processing job record in DB
+        # 3. Create MediaProcessingJob record for historical logging
         job = MediaProcessingJob(
             session_id=session_id,
             media_type="IMAGE",
@@ -163,19 +143,21 @@ class MediaAttendanceService:
             file_path="",
             file_size_bytes=len(image_bytes),
             duration_sec=0.0,
-            resolution=resolution_str,
+            resolution=result_dict.get("resolution", "1920x1080"),
             status="COMPLETED",
             progress_pct=100.0,
             frames_total=1,
             frames_processed=1,
-            faces_detected_total=len(results),
-            recognized_count=len(recognized_items),
-            unknown_count=sum(1 for u in unresolved_items if u.decision == "UNKNOWN"),
-            uncertain_count=sum(1 for u in unresolved_items if u.decision == "UNCERTAIN"),
-            attendance_marked_count=len(marked_student_ids),
+            faces_detected_total=result_dict["faces_detected"],
+            recognized_count=result_dict["students_recognized"],
+            unknown_count=result_dict["unknown_faces"],
+            uncertain_count=0,
+            attendance_marked_count=result_dict["attendance_marked"],
             summary_json={
-                "recognized": [item.model_dump() for item in recognized_items],
-                "unresolved": [item.model_dump() for item in unresolved_items],
+                "results": result_dict["results"],
+                "recognized": result_dict["recognized_students"],
+                "unresolved": result_dict["unresolved_faces"],
+                "duplicates_prevented": result_dict["duplicates_skipped"],
             },
             created_by=created_by,
             started_at=_utc_now(),
@@ -183,7 +165,7 @@ class MediaAttendanceService:
         )
         db.add(job)
 
-        # Audit log
+        # 4. Audit Log
         db.add(
             AuditLog(
                 action="MEDIA_IMAGE_ATTENDANCE",
@@ -191,16 +173,20 @@ class MediaAttendanceService:
                 entity_id=session_id,
                 new_values={
                     "filename": filename,
-                    "faces_detected": len(results),
-                    "recognized": len(recognized_items),
-                    "attendance_marked": len(marked_student_ids),
+                    "faces_detected": result_dict["faces_detected"],
+                    "recognized": result_dict["students_recognized"],
+                    "attendance_marked": result_dict["attendance_marked"],
+                    "duplicates_prevented": result_dict["duplicates_skipped"],
                 },
             )
         )
         await db.commit()
         await db.refresh(job)
 
+        elapsed_ms = round((time.perf_counter() - t0) * 1000.0, 2)
+
         return MediaAnalysisResponse(
+            success=True,
             job_id=job.id,
             session_id=session_id,
             session_subject=session_obj.subject,
@@ -208,14 +194,25 @@ class MediaAttendanceService:
             media_type="IMAGE",
             filename=filename,
             duration_sec=0.0,
-            resolution=resolution_str,
-            faces_detected=len(results),
-            recognized_count=len(recognized_items),
-            unknown_count=sum(1 for u in unresolved_items if u.decision == "UNKNOWN"),
-            uncertain_count=sum(1 for u in unresolved_items if u.decision == "UNCERTAIN"),
-            attendance_marked_count=len(marked_student_ids),
-            recognized_students=recognized_items,
-            unresolved_faces=unresolved_items,
+            resolution=result_dict.get("resolution", "1920x1080"),
+            faces_detected=result_dict["faces_detected"],
+            facesDetected=result_dict["faces_detected"],
+            recognized_count=result_dict["students_recognized"],
+            studentsRecognized=result_dict["students_recognized"],
+            unknown_count=result_dict["unknown_faces"],
+            unknownFaces=result_dict["unknownFaces"],
+            uncertain_count=0,
+            low_quality_count=0,
+            attendance_marked_count=result_dict["attendance_marked"],
+            attendanceMarked=result_dict["attendance_marked"],
+            duplicates_prevented=result_dict["duplicates_skipped"],
+            recognized_students=[MediaAttendanceItem(**r) for r in result_dict["recognized_students"]],
+            attendanceCandidates=result_dict["attendanceCandidates"],
+            unresolved_faces=[UnresolvedFaceItem(**u) for u in result_dict["unresolved_faces"]],
+            faces=[DetectedMediaFaceItem(**f) for f in result_dict["faces"]],
+            results=result_dict["results"],
+            annotatedImagePath=result_dict["annotated_image_url"],
+            annotated_image_url=result_dict["annotated_image_url"],
             processing_time_ms=elapsed_ms,
             status="COMPLETED",
         )
@@ -230,7 +227,6 @@ class MediaAttendanceService:
         created_by: Optional[str] = None,
     ) -> MediaProcessingJob:
         """Uploads a video and initializes a background MediaProcessingJob."""
-        # 1. Verify session exists
         session_res = await db.execute(
             select(AttendanceSession).where(AttendanceSession.id == session_id)
         )
@@ -238,19 +234,22 @@ class MediaAttendanceService:
         if not session_obj:
             raise SessionNotFoundError(f"Attendance session '{session_id}' not found.")
 
-        # 2. Save video file to disk
         file_id = os.urandom(8).hex()
         safe_name = Path(filename).name.replace(" ", "_")
         stored_path = UPLOAD_DIR / f"{file_id}_{safe_name}"
         stored_path.write_bytes(video_bytes)
 
-        # 3. Read video metadata
         cap = cv2.VideoCapture(str(stored_path))
         if not cap.isOpened():
             stored_path.unlink(missing_ok=True)
-            raise ValueError("Uploaded file is not a valid or decodable video.")
+            raise ValueError("Uploaded file is not a decodable video format. Supported: MP4, AVI, MKV, WebM, MOV.")
 
         total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        if total_frames <= 0:
+            cap.release()
+            stored_path.unlink(missing_ok=True)
+            raise ValueError("Uploaded video contains 0 readable frames.")
+
         video_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -286,10 +285,10 @@ class MediaAttendanceService:
     async def process_video_background(
         cls,
         job_id: str,
-        sample_fps: float = 3.0,
+        sample_fps: float = 2.0,
         session_factory: Optional[Any] = None,
     ) -> None:
-        """Background worker task that extracts frames, tracks faces, runs recognition, and marks attendance."""
+        """Background worker task processing video frame-by-frame using InsightFace."""
         from backend.app.database.session import AsyncSessionLocal
 
         def _get_db():
@@ -300,130 +299,71 @@ class MediaAttendanceService:
         cancel_event = asyncio.Event()
         _active_cancellation_events[job_id] = cancel_event
 
-        async with _get_db() as db:
-            job_res = await db.execute(
-                select(MediaProcessingJob).where(MediaProcessingJob.id == job_id)
+        try:
+            async with _get_db() as db:
+                job = await db.get(MediaProcessingJob, job_id)
+                if not job:
+                    logger.error(f"Job {job_id} not found.")
+                    return
+
+                job.status = "PROCESSING"
+                job.started_at = _utc_now()
+                await db.commit()
+
+                file_path = job.file_path
+                session_id = job.session_id
+                filename = job.filename
+
+            # Run video processing through media_processing_service
+            video_result = media_processing_service.process_video_attendance(
+                video_input=file_path,
+                session_id=session_id,
+                sample_rate=sample_fps,
+                filename=filename,
             )
-            job = job_res.scalars().first()
-            if not job:
-                logger.error(f"Job {job_id} not found for background execution.")
-                return
 
-            job.status = "PROCESSING"
-            job.started_at = _utc_now()
-            await db.commit()
-
-            file_path = job.file_path
-            session_id = job.session_id
-
-        # Video frame analysis loop
-        cap = cv2.VideoCapture(file_path)
-        if not cap.isOpened():
+            # Update job state
             async with _get_db() as db:
                 j = await db.get(MediaProcessingJob, job_id)
                 if j:
-                    j.status = "FAILED"
-                    j.error_message = "Could not open video file for frame processing."
+                    j.status = "COMPLETED"
+                    j.progress_pct = 100.0
+                    j.frames_processed = video_result["frames_processed"]
+                    j.faces_detected_total = video_result["faces_detected"]
+                    j.recognized_count = video_result["students_recognized"]
+                    j.unknown_count = video_result["unknown_faces"]
+                    j.attendance_marked_count = video_result["attendance_marked"]
+                    j.summary_json = {
+                        "results": video_result["results"],
+                        "recognized": video_result["recognized_students"],
+                        "unresolved": video_result["unresolved_faces"],
+                        "duplicates_prevented": video_result["duplicates_skipped"],
+                        "annotated_image_url": video_result.get("annotated_image_url"),
+                    }
                     j.completed_at = _utc_now()
+
+                    db.add(
+                        AuditLog(
+                            action="MEDIA_VIDEO_ATTENDANCE_COMPLETED",
+                            entity_type="media_processing_jobs",
+                            entity_id=job_id,
+                            new_values={
+                                "session_id": session_id,
+                                "frames_processed": video_result["frames_processed"],
+                                "faces_detected": video_result["faces_detected"],
+                                "recognized": video_result["students_recognized"],
+                                "attendance_marked": video_result["attendance_marked"],
+                                "duplicates_prevented": video_result["duplicates_skipped"],
+                            },
+                        )
+                    )
                     await db.commit()
-            _active_cancellation_events.pop(job_id, None)
-            return
 
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        orig_fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
-        frame_interval = max(1, int(round(orig_fps / sample_fps)))
-
-        pipeline = get_pipeline()
-        async with _get_db() as db:
-            if pipeline.matcher.total_templates == 0:
-                await RecognitionService.sync_gallery_from_db(db)
-
-            # Pre-load student details
-            st_res = await db.execute(select(Student))
-            student_lookup = {st.id: st for st in st_res.scalars().all()}
-
-        # Student recognition accumulator over time
-        # student_id -> { count: int, max_conf: float, first_seen_sec: float, last_seen_sec: float }
-        student_observations: Dict[str, Dict[str, Any]] = {}
-        unresolved_faces: List[UnresolvedFaceItem] = []
-        total_faces_detected = 0
-        frames_processed_count = 0
-        frame_idx = 0
-
-        try:
-            while cap.isOpened():
-                if cancel_event.is_set():
-                    logger.info(f"Job {job_id} was cancelled by user.")
-                    break
-
-                ret, frame = cap.read()
-                if not ret:
-                    break
-
-                if frame_idx % frame_interval == 0:
-                    frames_processed_count += 1
-                    sec_offset = round(frame_idx / orig_fps, 2)
-
-                    # Process frame
-                    results, face_boxes = pipeline.process_frame(frame)
-                    total_faces_detected += len(results)
-
-                    for idx, r in enumerate(results):
-                        if r.decision.value == "KNOWN" and r.best_match:
-                            s_id = r.best_match.student_id
-                            if s_id not in student_observations:
-                                student_observations[s_id] = {
-                                    "count": 1,
-                                    "max_conf": r.best_match.similarity,
-                                    "max_conf_pct": r.best_match.confidence_pct,
-                                    "first_seen_sec": sec_offset,
-                                    "last_seen_sec": sec_offset,
-                                    "name": r.best_match.name,
-                                }
-                            else:
-                                obs = student_observations[s_id]
-                                obs["count"] += 1
-                                obs["last_seen_sec"] = sec_offset
-                                if r.best_match.similarity > obs["max_conf"]:
-                                    obs["max_conf"] = r.best_match.similarity
-                                    obs["max_conf_pct"] = r.best_match.confidence_pct
-                        else:
-                            # Keep sample of unresolved faces (capped at 50 to avoid huge JSON)
-                            if len(unresolved_faces) < 50:
-                                bbox = face_boxes[idx].bbox.to_list()[:4] if idx < len(face_boxes) else []
-                                unresolved_faces.append(
-                                    UnresolvedFaceItem(
-                                        face_id=f"v_{frame_idx}_{idx}",
-                                        decision=r.decision.value,
-                                        confidence=round(r.best_match.similarity, 4) if r.best_match else 0.0,
-                                        confidence_pct=round(r.best_match.confidence_pct, 1) if r.best_match else 0.0,
-                                        timestamp_sec=sec_offset,
-                                        frame_number=frame_idx,
-                                        bbox=bbox,
-                                        quality_score=round(float(getattr(face_boxes[idx], 'det_score', 1.0)), 3) if idx < len(face_boxes) else 1.0,
-                                        rejection_reason=r.rejection_reason or ("Unrecognized" if r.decision.value == "UNKNOWN" else "Uncertain"),
-                                    )
-                                )
-
-                    # Periodic DB progress update every 15 sampled frames
-                    if frames_processed_count % 15 == 0:
-                        progress = round((frame_idx / max(1, total_frames)) * 100.0, 1)
-                        async with _get_db() as db:
-                            j = await db.get(MediaProcessingJob, job_id)
-                            if j and j.status == "PROCESSING":
-                                j.progress_pct = progress
-                                j.frames_processed = frames_processed_count
-                                j.faces_detected_total = total_faces_detected
-                                j.recognized_count = len(student_observations)
-                                await db.commit()
-
-                    # Yield control to event loop
-                    await asyncio.sleep(0.001)
-
-                frame_idx += 1
+            logger.info(f"Video job {job_id} completed successfully. Marked {video_result['attendance_marked']} students.")
 
         except Exception as proc_err:
             logger.error(f"Error during video processing job {job_id}: {proc_err}", exc_info=True)
+            traceback.print_exc()
             async with _get_db() as db:
                 j = await db.get(MediaProcessingJob, job_id)
                 if j:
@@ -431,109 +371,8 @@ class MediaAttendanceService:
                     j.error_message = str(proc_err)
                     j.completed_at = _utc_now()
                     await db.commit()
-            cap.release()
+        finally:
             _active_cancellation_events.pop(job_id, None)
-            return
-
-        cap.release()
-
-        # Handle Cancellation
-        if cancel_event.is_set():
-            async with _get_db() as db:
-                j = await db.get(MediaProcessingJob, job_id)
-                if j:
-                    j.status = "CANCELLED"
-                    j.completed_at = _utc_now()
-                    await db.commit()
-            _active_cancellation_events.pop(job_id, None)
-            return
-
-        # 4. Finalize attendance marking for all verified students (ONE RECORD PER STUDENT PER SESSION)
-        recognized_items: List[MediaAttendanceItem] = []
-        marked_count = 0
-
-        async with _get_db() as db:
-            for s_id, obs in student_observations.items():
-                st_ent = student_lookup.get(s_id)
-                st_name = st_ent.full_name if st_ent else obs["name"]
-                st_code = st_ent.student_code if st_ent else ""
-                st_roll = st_ent.roll_number if st_ent else ""
-
-                # Format timestamps
-                m_start, s_start = divmod(int(obs["first_seen_sec"]), 60)
-                m_end, s_end = divmod(int(obs["last_seen_sec"]), 60)
-                time_range_str = f"{m_start:02d}:{s_start:02d} - {m_end:02d}:{s_end:02d}"
-
-                try:
-                    await AttendanceService.mark_attendance(
-                        db=db,
-                        session_id=session_id,
-                        payload=AttendanceMarkPayload(
-                            student_id=s_id,
-                            confidence=obs["max_conf"],
-                            liveness_score=1.0,
-                            source="MEDIA_VIDEO",
-                            remarks=f"Media Video: {time_range_str} ({obs['count']} observations, {obs['max_conf_pct']:.1f}%)",
-                        ),
-                        allow_non_active=True,
-                    )
-                    marked_count += 1
-                except Exception as e:
-                    logger.warning(f"Attendance mark error for {st_name}: {e}")
-
-                recognized_items.append(
-                    MediaAttendanceItem(
-                        student_id=s_id,
-                        student_name=st_name,
-                        student_code=st_code,
-                        roll_number=st_roll,
-                        confidence=round(obs["max_conf"], 4),
-                        confidence_pct=round(obs["max_conf_pct"], 1),
-                        attendance_status="PRESENT",
-                        decision="KNOWN",
-                        first_seen=f"{m_start:02d}:{s_start:02d}",
-                        last_seen=f"{m_end:02d}:{s_end:02d}",
-                        observation_count=obs["count"],
-                        remarks=f"Observed {obs['count']} times ({time_range_str})",
-                    )
-                )
-
-            # Update final job state
-            j = await db.get(MediaProcessingJob, job_id)
-            if j:
-                j.status = "COMPLETED"
-                j.progress_pct = 100.0
-                j.frames_processed = frames_processed_count
-                j.faces_detected_total = total_faces_detected
-                j.recognized_count = len(recognized_items)
-                j.unknown_count = sum(1 for u in unresolved_faces if u.decision == "UNKNOWN")
-                j.uncertain_count = sum(1 for u in unresolved_faces if u.decision == "UNCERTAIN")
-                j.attendance_marked_count = marked_count
-                j.summary_json = {
-                    "recognized": [item.model_dump() for item in recognized_items],
-                    "unresolved": [item.model_dump() for item in unresolved_faces],
-                }
-                j.completed_at = _utc_now()
-
-            # Audit log
-            db.add(
-                AuditLog(
-                    action="MEDIA_VIDEO_ATTENDANCE_COMPLETED",
-                    entity_type="media_processing_jobs",
-                    entity_id=job_id,
-                    new_values={
-                        "session_id": session_id,
-                        "frames_processed": frames_processed_count,
-                        "faces_detected": total_faces_detected,
-                        "recognized": len(recognized_items),
-                        "attendance_marked": marked_count,
-                    },
-                )
-            )
-            await db.commit()
-
-        _active_cancellation_events.pop(job_id, None)
-        logger.info(f"Job {job_id} completed successfully. Marked {marked_count} students.")
 
     @classmethod
     async def cancel_job(cls, db: AsyncSession, job_id: str) -> bool:
@@ -553,16 +392,71 @@ class MediaAttendanceService:
         return False
 
     @classmethod
+    async def delete_job(cls, db: AsyncSession, job_id: str) -> bool:
+        """Deletes a media processing job and removes any stored media file."""
+        job = await db.get(MediaProcessingJob, job_id)
+        if not job:
+            return False
+
+        if job.file_path:
+            p = Path(job.file_path)
+            p.unlink(missing_ok=True)
+
+        await db.delete(job)
+        await db.commit()
+        return True
+
+    @classmethod
+    async def get_job_by_id(cls, db: AsyncSession, job_id: str) -> Optional[MediaJobResponse]:
+        """Fetches a media processing job with joined session metadata."""
+        query = (
+            select(MediaProcessingJob)
+            .where(MediaProcessingJob.id == job_id)
+            .options(selectinload(MediaProcessingJob.session))
+        )
+        res = await db.execute(query)
+        job = res.scalars().first()
+        if not job:
+            return None
+
+        return MediaJobResponse(
+            id=job.id,
+            session_id=job.session_id,
+            session_subject=job.session.subject if job.session else None,
+            session_class=job.session.class_name if job.session else None,
+            media_type=job.media_type,
+            filename=job.filename,
+            file_size_bytes=job.file_size_bytes,
+            duration_sec=job.duration_sec,
+            resolution=job.resolution,
+            status=job.status,
+            progress_pct=job.progress_pct,
+            frames_total=job.frames_total,
+            frames_processed=job.frames_processed,
+            faces_detected_total=job.faces_detected_total,
+            recognized_count=job.recognized_count,
+            unknown_count=job.unknown_count,
+            uncertain_count=job.uncertain_count,
+            attendance_marked_count=job.attendance_marked_count,
+            summary_json=job.summary_json,
+            error_message=job.error_message,
+            created_by=job.created_by,
+            started_at=job.started_at,
+            completed_at=job.completed_at,
+            created_at=job.created_at,
+        )
+
+    @classmethod
     async def list_jobs(
         cls,
         db: AsyncSession,
         session_id: Optional[str] = None,
         limit: int = 50,
     ) -> List[MediaJobResponse]:
-        """Lists recent media processing jobs."""
+        """Lists historical media processing jobs ordered by creation date."""
         query = (
-            select(MediaProcessingJob, AttendanceSession.subject, AttendanceSession.class_name)
-            .join(AttendanceSession, MediaProcessingJob.session_id == AttendanceSession.id, isouter=True)
+            select(MediaProcessingJob)
+            .options(selectinload(MediaProcessingJob.session))
             .order_by(desc(MediaProcessingJob.created_at))
             .limit(limit)
         )
@@ -570,52 +464,34 @@ class MediaAttendanceService:
             query = query.where(MediaProcessingJob.session_id == session_id)
 
         res = await db.execute(query)
-        rows = res.all()
+        jobs = res.scalars().all()
 
-        results = []
-        for job_ent, subj, cls_name in rows:
-            resp = MediaJobResponse.model_validate(job_ent)
-            resp.session_subject = subj or ""
-            resp.session_class = cls_name or ""
-            results.append(resp)
-        return results
-
-    @classmethod
-    async def get_job_by_id(
-        cls,
-        db: AsyncSession,
-        job_id: str,
-    ) -> Optional[MediaJobResponse]:
-        """Retrieves details for a specific media processing job."""
-        query = (
-            select(MediaProcessingJob, AttendanceSession.subject, AttendanceSession.class_name)
-            .join(AttendanceSession, MediaProcessingJob.session_id == AttendanceSession.id, isouter=True)
-            .where(MediaProcessingJob.id == job_id)
-        )
-        res = await db.execute(query)
-        row = res.first()
-        if not row:
-            return None
-
-        job_ent, subj, cls_name = row
-        resp = MediaJobResponse.model_validate(job_ent)
-        resp.session_subject = subj or ""
-        resp.session_class = cls_name or ""
-        return resp
-
-    @classmethod
-    async def delete_job(cls, db: AsyncSession, job_id: str) -> bool:
-        """Deletes a media processing job and removes the uploaded file."""
-        job = await db.get(MediaProcessingJob, job_id)
-        if not job:
-            return False
-
-        if job.file_path and os.path.exists(job.file_path):
-            try:
-                os.remove(job.file_path)
-            except Exception as e:
-                logger.warning(f"Failed to delete media file {job.file_path}: {e}")
-
-        await db.delete(job)
-        await db.commit()
-        return True
+        return [
+            MediaJobResponse(
+                id=j.id,
+                session_id=j.session_id,
+                session_subject=j.session.subject if j.session else None,
+                session_class=j.session.class_name if j.session else None,
+                media_type=j.media_type,
+                filename=j.filename,
+                file_size_bytes=j.file_size_bytes,
+                duration_sec=j.duration_sec,
+                resolution=j.resolution,
+                status=j.status,
+                progress_pct=j.progress_pct,
+                frames_total=j.frames_total,
+                frames_processed=j.frames_processed,
+                faces_detected_total=j.faces_detected_total,
+                recognized_count=j.recognized_count,
+                unknown_count=j.unknown_count,
+                uncertain_count=j.uncertain_count,
+                attendance_marked_count=j.attendance_marked_count,
+                summary_json=j.summary_json,
+                error_message=j.error_message,
+                created_by=j.created_by,
+                started_at=j.started_at,
+                completed_at=j.completed_at,
+                created_at=j.created_at,
+            )
+            for j in jobs
+        ]

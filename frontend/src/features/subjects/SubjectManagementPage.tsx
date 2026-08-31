@@ -35,6 +35,7 @@ import {
   ClassSectionCreatePayload,
   TimetableEntry,
 } from '../../types/subject';
+import { formatApiErrorMessage } from '../../utils/apiError';
 
 interface SubjectManagementPageProps {
   onNavigate?: (tab: string, extra?: any) => void;
@@ -179,9 +180,7 @@ export const SubjectManagementPage: React.FC<SubjectManagementPageProps> = ({ on
       loadClasses();
     } catch (err: any) {
       setErrorMessage(
-        err.response?.data?.detail?.message ||
-        err.response?.data?.detail ||
-        'Failed to save subject. Make sure the course code is unique.'
+        formatApiErrorMessage(err, 'Failed to save subject. Make sure the course code is unique.')
       );
     }
   };
@@ -200,7 +199,7 @@ export const SubjectManagementPage: React.FC<SubjectManagementPageProps> = ({ on
         loadSubjects();
         loadClasses();
       } catch (err) {
-        alert('Failed to delete/deactivate subject.');
+        alert(formatApiErrorMessage(err, 'Failed to delete/deactivate subject.'));
       }
     }
   };
@@ -220,9 +219,7 @@ export const SubjectManagementPage: React.FC<SubjectManagementPageProps> = ({ on
       loadClasses();
     } catch (err: any) {
       setErrorMessage(
-        err.response?.data?.detail?.message ||
-        err.response?.data?.detail ||
-        'Failed to save class. Make sure the class name is unique.'
+        formatApiErrorMessage(err, 'Failed to save class. Make sure the class name is unique.')
       );
     }
   };

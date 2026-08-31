@@ -17,23 +17,23 @@ def test_partial_occlusion_recovery_and_confirmation():
     -> Student partially occluded by hand/obstacle (Frames 2-3) -> Tracker holds track ID & state
     -> Clear frames reappear (Frames 4-5) -> Temporal verifier confirms identity!
     """
-    pankaj_test_path = WORKSPACE_ROOT / "tests" / "fixtures" / "pankaj.jpg"
+    sample_test_path = WORKSPACE_ROOT / "tests" / "fixtures" / "sample_student.jpg"
 
-    if not pankaj_test_path.exists():
+    if not sample_test_path.exists():
         pytest.skip("Dataset images not found on disk")
 
     pipeline = VideoRecognitionPipeline(detection_interval=1)
 
-    # 1. Enroll Pankaj
-    img_enroll = cv2.imread(str(pankaj_test_path))
+    # 1. Enroll sample student
+    img_enroll = cv2.imread(str(sample_test_path))
     emb_p = pipeline.embedder.extract_from_image(img_enroll, pipeline.detector.detect(img_enroll)[0].landmarks)
 
-    template = EnrolledTemplate("p1", "s_pankaj", "STU-001", "CSE-01", "Pankaj", emb_p, 0.95, "FRONT")
+    template = EnrolledTemplate("p1", "s_sample", "STU-001", "CSE-01", "Sample Student", emb_p, 0.95, "FRONT")
     pipeline.load_gallery([template])
     pipeline.reset_tracking()
 
     # Load clean test image
-    img_clean = cv2.imread(str(pankaj_test_path))
+    img_clean = cv2.imread(str(sample_test_path))
 
     # 2. Frame 1: Clear face
     results_f1, _ = pipeline.process_frame(img_clean)
@@ -71,7 +71,7 @@ def test_partial_occlusion_recovery_and_confirmation():
     # Verification must now be CONFIRMED KNOWN as clear evidence was accumulated!
     assert confirmed_face.decision == DecisionState.KNOWN
     assert confirmed_face.is_confirmed is True
-    assert confirmed_face.confirmed_name == "Pankaj"
+    assert confirmed_face.confirmed_name == "Sample Student"
     assert confirmed_face.average_similarity >= 0.65
     print(f"\n[OCCLUSION RECOVERY PASSED] Track #{t_id} confirmed as {confirmed_face.confirmed_name} (avg sim {confirmed_face.average_similarity:.4f}) across occlusion gap.")
 

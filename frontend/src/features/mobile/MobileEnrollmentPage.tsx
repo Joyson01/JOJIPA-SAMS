@@ -9,6 +9,7 @@ import {
 import { apiClient } from '../../services/api';
 import { fetchStudentById } from '../../services/studentApi';
 import { Student } from '../../types/student';
+import { formatApiErrorMessage } from '../../utils/apiError';
 
 const TARGET_SAMPLES = 6;
 const INSTRUCTIONS = [
@@ -284,7 +285,7 @@ export const MobileEnrollmentPage: React.FC = () => {
         }
       } catch (err: any) {
         setStatusType('warning');
-        setStatusMessage(err.response?.data?.detail?.message || 'Error processing sample.');
+        setStatusMessage(formatApiErrorMessage(err, 'Error processing sample.'));
       } finally {
         setCapturing(false);
       }

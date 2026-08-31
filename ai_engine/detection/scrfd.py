@@ -29,10 +29,25 @@ class SCRFDFaceDetector:
         # Locate InsightFace root
         if root_dir is None:
             root_dir = os.path.expanduser("~/.insightface")
-
         self.root_dir = root_dir
         self._app: Optional[FaceAnalysis] = None
         self._initialize_detector()
+
+    def set_thresholds(
+        self,
+        det_thresh: Optional[float] = None,
+        nms_thresh: Optional[float] = None,
+        det_size: Optional[Tuple[int, int]] = None,
+    ) -> None:
+        """Dynamically update face detection parameters."""
+        if det_thresh is not None:
+            self.det_thresh = det_thresh
+        if nms_thresh is not None:
+            self.nms_thresh = nms_thresh
+        if det_size is not None:
+            self.det_size = det_size
+        if self._app is not None and (det_thresh is not None or det_size is not None):
+            self._app.prepare(ctx_id=self.ctx_id, det_size=self.det_size, det_thresh=self.det_thresh)
 
     def _initialize_detector(self) -> None:
         """Loads and prepares the detector network."""

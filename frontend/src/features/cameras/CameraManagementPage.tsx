@@ -33,6 +33,7 @@ import {
   CameraTestResult,
   ONVIFDiscoveredCamera,
 } from '../../types/camera';
+import { formatApiErrorMessage } from '../../utils/apiError';
 import { apiClient } from '../../services/api';
 import { CameraPreview } from '../../components/CameraPreview';
 
@@ -146,7 +147,7 @@ export const CameraManagementPage: React.FC = () => {
       setTestResult({
         success: false,
         status: 'CAMERA ERROR',
-        message: err.response?.data?.detail?.message || 'Camera diagnostic failed to connect.',
+        message: formatApiErrorMessage(err, 'Camera diagnostic failed to connect.'),
         connection: false,
         stream: false,
         frames: false,
@@ -174,7 +175,7 @@ export const CameraManagementPage: React.FC = () => {
       setFormTestResult({
         success: false,
         status: 'CONNECTION FAILED',
-        message: err.response?.data?.detail?.message || 'Failed to establish test stream.',
+        message: formatApiErrorMessage(err, 'Failed to establish test stream.'),
         connection: false,
         stream: false,
         frames: false,
@@ -268,7 +269,7 @@ export const CameraManagementPage: React.FC = () => {
       setIsAddModalOpen(false);
       loadData();
     } catch (err: any) {
-      alert(err.response?.data?.detail?.message || 'Failed to add camera.');
+      alert(formatApiErrorMessage(err, 'Failed to add camera.'));
     }
   };
 
@@ -282,7 +283,7 @@ export const CameraManagementPage: React.FC = () => {
       setIsEditModalOpen(false);
       loadData();
     } catch (err: any) {
-      alert('Failed to update camera.');
+      alert(formatApiErrorMessage(err, 'Failed to update camera.'));
     }
   };
 

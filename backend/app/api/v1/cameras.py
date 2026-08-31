@@ -1,3 +1,5 @@
+import asyncio
+from datetime import datetime, timezone
 from typing import List, Optional
 import cv2
 from fastapi import (
@@ -16,6 +18,7 @@ from fastapi import (
 )
 from fastapi.responses import StreamingResponse
 import numpy as np
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -76,6 +79,34 @@ async def discover_onvif(
     timeout: float = Query(1.5, ge=0.5, le=5.0, description="Probe timeout in seconds"),
 ) -> ONVIFDiscoveryResponse:
     return CameraService.discover_onvif_cameras(timeout_sec=timeout)
+
+
+@router.post(
+    "/mobile-pairing",
+    response_model=MobilePairingResponse,
+    summary="Generate Mobile Camera Pairing Token (POST)",
+    description="Generates or renews a QR pairing session for smartphone video streaming.",
+)
+@router.get(
+    "/mobile-pairing",
+    response_model=MobilePairingResponse,
+    summary="Generate Mobile Camera Pairing Token (GET)",
+    description="Generates or renews a QR pairing session for smartphone video streaming.",
+)
+async def create_mobile_pairing(
+    camera_id: Optional[str] = Query(None, description="Existing camera ID to renew pairing for"),
+    camera_name: str = Query("Mobile Phone Camera", description="Display name for newly created mobile camera"),
+    location: str = Query("Classroom", description="Physical location or room name"),
+    assigned_class: Optional[str] = Query(None, description="Class assigned to this camera"),
+    db: AsyncSession = Depends(get_db),
+) -> MobilePairingResponse:
+    return await CameraService.create_or_renew_mobile_pairing(
+        db=db,
+        camera_id=camera_id,
+        camera_name=camera_name,
+        location=location,
+        assigned_class=assigned_class,
+    )
 
 
 @router.get(
@@ -144,18 +175,31 @@ async def delete_camera(
     return None
 
 
+@router.get(
+    "/{camera_id}/test",
+    response_model=CameraTestResult,
+    summary="Test Registered Camera Feed (GET)",
+    description="Runs a real diagnostic test on a registered camera by its ID.",
+)
 @router.post(
     "/{camera_id}/test",
     response_model=CameraTestResult,
-    summary="Test Registered Camera Feed",
+    summary="Test Registered Camera Feed (POST)",
     description="Runs a real diagnostic test on a registered camera by its ID.",
 )
 async def test_registered_camera(
     camera_id: str,
     db: AsyncSession = Depends(get_db),
 ) -> CameraTestResult:
-    cam = await CameraService.get_camera_by_id(db, camera_id)
-    return CameraService.test_camera_connection(stream_url=cam.stream_url, device_id=cam.device_id)
+    cam_model = await db.get(Camera, camera_id)
+    if not cam_model:
+        raise HTTPException(status_code=404, detail=f"Camera with ID '{camera_id}' not found.")
+    return await asyncio.to_thread(CameraService.test_camera_connection, stream_url=cam_model.stream_url, device_id=cam_model.device_id)
+
+
+class CameraTestInput(BaseModel):
+    stream_url: Optional[str] = None
+    device_id: Optional[str] = None
 
 
 @router.post(
@@ -165,10 +209,11 @@ async def test_registered_camera(
     description="Performs an immediate real camera handshake test and returns measured latency, FPS, resolution, and detector validation.",
 )
 async def test_connection(
-    stream_url: Optional[str] = Body(None, embed=True),
-    device_id: Optional[str] = Body(None, embed=True),
+    payload: Optional[CameraTestInput] = Body(default=None),
 ) -> CameraTestResult:
-    return CameraService.test_camera_connection(stream_url=stream_url, device_id=device_id)
+    stream_url = payload.stream_url if payload else None
+    device_id = payload.device_id if payload else None
+    return await asyncio.to_thread(CameraService.test_camera_connection, stream_url=stream_url, device_id=device_id)
 
 
 @router.post(
@@ -197,60 +242,74 @@ async def stop_camera_worker(camera_id: str):
     return {"status": "stopped", "camera_id": camera_id}
 
 
-@router.post(
-    "/mobile-pairing",
-    response_model=MobilePairingResponse,
-    summary="Generate Mobile Camera Pairing Token",
-    description="Generates a temporary secure pairing session for smartphone camera streaming without creating duplicate camera records.",
+@router.get(
+    "/{camera_id}/frame",
+    summary="Get Camera Latest Frame",
+    description="Returns the latest decoded image frame as a JPEG image for browser preview.",
 )
-async def create_mobile_pairing(
-    camera_id: Optional[str] = Query(None, description="Existing camera ID to re-pair"),
-    camera_name: str = Query("Mobile Phone Camera", description="Label for the mobile device"),
-    location: str = Query("Classroom", description="Location where the phone is deployed"),
-    assigned_class: Optional[str] = Query(None, description="Class code"),
-    db: AsyncSession = Depends(get_db),
-) -> MobilePairingResponse:
-    return await CameraService.create_or_renew_mobile_pairing(
-        db=db,
-        camera_id=camera_id,
-        camera_name=camera_name,
-        location=location,
-        assigned_class=assigned_class,
-    )
-
-
-@router.post(
-    "/{camera_id}/revoke-pairing",
-    summary="Revoke Mobile Pairing",
-    description="Revokes all active pairing sessions for the camera and resets status to OFFLINE.",
-)
-async def revoke_mobile_pairing(
-    camera_id: str,
-    db: AsyncSession = Depends(get_db),
-):
-    await CameraService.revoke_pairing(db, camera_id)
-    return {"status": "revoked", "camera_id": camera_id}
-
-
 @router.get(
     "/{camera_id}/preview",
     summary="Get Camera Latest Frame Snapshot",
     description="Returns the latest decoded image frame as a JPEG buffer for web preview.",
 )
-async def get_camera_preview(
+async def get_camera_frame(
     camera_id: str,
     db: AsyncSession = Depends(get_db),
 ):
-    frame = CameraService.get_cached_frame(camera_id)
+    cam_model = await db.get(Camera, camera_id)
+    frame = await asyncio.to_thread(CameraService.capture_camera_frame, camera_id, camera_obj=cam_model)
     if frame is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="No live video frame currently available for this camera.",
+            detail="No live video frame currently available for this camera. Verify camera stream is running.",
         )
-    ret, jpeg = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
+    ret, jpeg = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
     if not ret:
         raise HTTPException(status_code=500, detail="Failed to encode JPEG preview.")
     return Response(content=jpeg.tobytes(), media_type="image/jpeg")
+
+
+@router.post(
+    "/{camera_id}/capture",
+    summary="Capture Frame From Camera",
+    description="Captures the latest high-resolution frame from the camera stream, saves it to outputs/, and returns the image URL.",
+)
+async def capture_camera_frame_endpoint(
+    camera_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    import uuid
+    from pathlib import Path
+    cam_model = await db.get(Camera, camera_id)
+    if not cam_model:
+        raise HTTPException(status_code=404, detail=f"Camera with ID '{camera_id}' not found.")
+
+    frame = await asyncio.to_thread(CameraService.capture_camera_frame, camera_id, camera_obj=cam_model)
+    if frame is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Could not capture frame from camera '{cam_model.name}'. Ensure IP Camera or stream is accessible at '{cam_model.stream_url}'.",
+        )
+
+    h, w = frame.shape[:2]
+    out_id = uuid.uuid4().hex[:8]
+    filename = f"capture_{out_id}.jpg"
+    
+    project_root = Path(__file__).resolve().parent.parent.parent.parent
+    outputs_dir = project_root / "outputs"
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    out_path = outputs_dir / filename
+    cv2.imwrite(str(out_path), frame, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+
+    return {
+        "success": True,
+        "camera_id": camera_id,
+        "camera_name": cam_model.name,
+        "frame_url": f"/outputs/{filename}",
+        "width": w,
+        "height": h,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 @router.get(

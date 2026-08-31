@@ -30,14 +30,14 @@ async def test_recognition_api_thresholds_endpoints(client):
 
 @pytest.mark.asyncio
 async def test_recognition_api_process_image(client):
-    test_img_path = WORKSPACE_ROOT / "tests" / "fixtures" / "pankaj.jpg"
+    test_img_path = WORKSPACE_ROOT / "tests" / "fixtures" / "sample_student.jpg"
     if not test_img_path.exists():
         pytest.skip("Test image not found")
 
     with open(test_img_path, "rb") as f:
         img_bytes = f.read()
 
-    files = {"file": ("pankaj.jpg", img_bytes, "image/jpeg")}
+    files = {"file": ("sample_student.jpg", img_bytes, "image/jpeg")}
     resp = await client.post("/api/v1/recognition/process?top_k=3", files=files)
     assert resp.status_code == 200
     res_data = resp.json()

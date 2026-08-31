@@ -12,6 +12,7 @@ from ai_engine.recognition.vector_matcher import EnrolledTemplate
 from backend.app.core.logging import logger
 from backend.app.models.entities import FaceProfile, Student
 from backend.app.schemas.recognition import (
+    AIRecognitionConfig,
     CandidateDTO,
     DetectedFaceResultDTO,
     RecognitionResponse,
@@ -20,6 +21,7 @@ from backend.app.schemas.recognition import (
 
 _pipeline_instance: Optional[FaceRecognitionPipeline] = None
 _pipeline_lock = asyncio.Lock()
+_active_ai_config = AIRecognitionConfig()
 
 
 def get_pipeline() -> FaceRecognitionPipeline:
@@ -33,6 +35,51 @@ def get_pipeline() -> FaceRecognitionPipeline:
 
 class RecognitionService:
     """Service orchestrating face recognition and gallery synchronization with PostgreSQL."""
+
+    @classmethod
+    def get_config(cls) -> AIRecognitionConfig:
+        return _active_ai_config
+
+    @classmethod
+    def set_config(cls, config: AIRecognitionConfig) -> AIRecognitionConfig:
+        global _active_ai_config
+        _active_ai_config = config
+        pipeline = get_pipeline()
+
+        # Update Matcher
+        pipeline.matcher.set_thresholds(
+            known_threshold=config.known_threshold,
+            uncertain_threshold=config.uncertain_threshold,
+            margin_threshold=config.margin_threshold,
+        )
+
+        # Update Quality Analyzer
+        pipeline.quality_analyzer.set_thresholds(
+            min_face_size=config.min_face_size,
+            min_sharpness=config.min_sharpness,
+            min_brightness=config.min_brightness,
+            max_brightness=config.max_brightness,
+        )
+
+        # Update Pose Estimator
+        pipeline.pose_estimator.set_thresholds(
+            max_yaw=config.max_yaw,
+            max_pitch=config.max_pitch,
+        )
+
+        # Update Liveness Detector
+        pipeline.liveness_detector.set_thresholds(
+            liveness_threshold=config.liveness_threshold,
+            mode=config.liveness_mode,
+        )
+
+        # Update Face Detector
+        pipeline.detector.set_thresholds(
+            det_thresh=config.detection_confidence_threshold,
+        )
+
+        logger.info(f"Updated AI Recognition configuration: known_thresh={config.known_threshold}, liveness_mode={config.liveness_mode}")
+        return _active_ai_config
 
     @classmethod
     async def sync_gallery_from_db(cls, db: AsyncSession) -> int:
@@ -126,6 +173,18 @@ class RecognitionService:
                 for c in r.top_candidates
             ]
 
+            # Determine explicit visual status
+            if r.quality and not r.quality.is_valid:
+                status_str = "QUALITY_REJECTED"
+            elif r.decision == DecisionState.KNOWN:
+                status_str = "VERIFIED"
+            elif r.decision == DecisionState.UNCERTAIN:
+                status_str = "VERIFYING" if r.best_match else "UNKNOWN"
+            else:
+                status_str = "UNKNOWN"
+
+            provisional_name = r.best_match.name if r.best_match else None
+
             face_dtos.append(
                 DetectedFaceResultDTO(
                     face_idx=r.face_idx,
@@ -142,6 +201,13 @@ class RecognitionService:
                     pitch=r.pose.pitch if r.pose else 0.0,
                     roll=r.pose.roll if r.pose else 0.0,
                     decision_reason=r.decision_reason,
+                    track_id=None,
+                    status=status_str,
+                    provisional_name=provisional_name,
+                    frames_needed=0 if status_str == "VERIFIED" else 1,
+                    confidence_history=[round(r.best_match.similarity, 3)] if r.best_match else [],
+                    liveness_score=r.liveness_score,
+                    is_live=r.is_live,
                 )
             )
 
@@ -149,6 +215,7 @@ class RecognitionService:
             "known_threshold": pipeline.matcher.known_threshold,
             "uncertain_threshold": pipeline.matcher.uncertain_threshold,
             "margin_threshold": pipeline.matcher.margin_threshold,
+            "liveness_mode": _active_ai_config.liveness_mode,
         }
 
         return RecognitionResponse(

@@ -1,3 +1,4 @@
+from typing import Optional
 import math
 import numpy as np
 from ai_engine.base import PoseEstimate
@@ -15,6 +16,20 @@ class HeadPoseEstimator:
         self.max_yaw = max_yaw
         self.max_pitch = max_pitch
         self.max_roll = max_roll
+
+    def set_thresholds(
+        self,
+        max_yaw: Optional[float] = None,
+        max_pitch: Optional[float] = None,
+        max_roll: Optional[float] = None,
+    ) -> None:
+        """Dynamically update head pose angle limits."""
+        if max_yaw is not None:
+            self.max_yaw = max_yaw
+        if max_pitch is not None:
+            self.max_pitch = max_pitch
+        if max_roll is not None:
+            self.max_roll = max_roll
 
     def estimate(self, landmarks: np.ndarray) -> PoseEstimate:
         """Computes Euler head pose angles and classification from 5 landmarks.

@@ -23,7 +23,7 @@ def test_websocket_stream_preview():
         assert "count" in resp_sync
 
         # 3. Send image frame (bytes)
-        img_path = WORKSPACE_ROOT / "tests" / "fixtures" / "pankaj.jpg"
+        img_path = WORKSPACE_ROOT / "tests" / "fixtures" / "sample_student.jpg"
         if img_path.exists():
             with open(img_path, "rb") as f:
                 img_bytes = f.read()

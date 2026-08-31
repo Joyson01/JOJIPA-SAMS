@@ -1,65 +1,109 @@
+# ==============================================================================
+# SMART ATTENDANCE MANAGEMENT SYSTEM (SAMS) - .gitignore
+# ==============================================================================
+
 # Virtual Environments
 .venv/
 venv/
 ENV/
 env/
+.env.local
+.env.*.local
 
-# Python Cache & Bytecode
+# Python Bytecode, Caches & Testing
 __pycache__/
 *.py[cod]
 *$py.class
-*.pytest_cache/
+.pytest_cache/
 .coverage
 htmlcov/
 .cache/
+.mypy_cache/
+.ruff_cache/
 
-# AI Model Caches & Large Weights
+# AI Model Caches, Weights & Biometric Data
 .insightface/
 models/*.onnx
 models/*.engine
 models/*.pt
 models/*.pth
 embeddings/*
+!embeddings/.gitkeep
+!embeddings/README.md
+*.npy
+*.onnx
 
-# Environment Variables & Secrets
+# Environment Variables, Secrets & Certificates
 .env
-.env.local
-.env.*.local
 *.pem
 *.key
 *.cert
+*.crt
 
 # Databases & Runtime Data
 data/*.db
+data/*.sqlite
 data/*.sqlite3
+*.db
+*.sqlite
+*.sqlite3
 data/students/*
+data/enrollment_images/*
 data/uploads/*
+!data/uploads/.gitkeep
 data/uploads/media/*
+!data/uploads/media/.gitkeep
+data/uploads/videos/*
+!data/uploads/videos/.gitkeep
+
+# Uploads, Outputs & Media Artifacts
 uploads/*
-logs/
-*.log
+!uploads/.gitkeep
+outputs/*
+!outputs/.gitkeep
+processed/*
+!processed/.gitkeep
+media/*
+!media/.gitkeep
+temp/
+tmp/
+scratch/
 .run/
 *.pid
+
+# Logs
+logs/*
+!logs/.gitkeep
+*.log
 
 # Node & Frontend Build Artifacts
 node_modules/
 frontend/node_modules/
+dist/
 frontend/dist/
 frontend/.pnpm-store/
-dist/
 build/
 .next/
 .turbo/
 
-# Media & Images (Except test fixtures if explicitly allowed)
-scratch/test_faces/
+# Media & Images (Ignore all loose images/videos except test fixtures)
 *.jpg
 *.jpeg
 *.png
+*.mp4
+*.avi
+*.mkv
+*.mov
+*.webm
 !tests/fixtures/*.jpg
 !tests/fixtures/*.png
 !.gitkeep
 
-# Operating System Files
+# IDE & OS System Files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 .DS_Store
 Thumbs.db
